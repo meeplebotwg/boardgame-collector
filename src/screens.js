@@ -11,8 +11,10 @@ import {
   resetLuma,
 } from "./state.js";
 import { isValidEmail, parseBatch, splitDraft } from "./parse.js";
+import { eventDraft, validAttendance } from "./messages.js";
 import {
   enqueue,
+  importSignups,
   pendingAddresses,
   nextBatch,
   remainingToday,
@@ -55,7 +57,14 @@ import {
   recordCheck,
   lastCheck,
 } from "./updater.js";
-import { readNewestBackup, pickBackup, mergeContacts } from "./backup.js";
+import {
+  readNewestBackup,
+  pickBackup,
+  mergeContacts,
+  readNewestSignupBackup,
+  pickSignupBackup,
+  mergeSignups,
+} from "./backup.js";
 
 const SOURCES = ["At an event", "Discord", "Friend referral", "Website form"];
 
@@ -465,6 +474,99 @@ function restoreCard() {
   );
 }
 
+function signupRestoreScreen() {
+  const preview = h("div", { class: "stack" });
+  function offer(found) {
+    if (!found) {
+      preview.replaceChildren(
+        h(
+          "div",
+          { class: "empty" },
+          "No readable signup backup found. Choose a file from Downloads/BGN Coordinator after a reinstall.",
+        ),
+      );
+      return;
+    }
+    const current = pendingAddresses().map((email) => ({ kind: "one", email }));
+    const merged = mergeSignups(current, found.queue);
+    const n =
+      merged.flatMap((it) => (it.kind === "batch" ? it.emails : [it.email]))
+        .length - current.length;
+    preview.replaceChildren(
+      h(
+        "div",
+        { class: "card-body" },
+        `${found.name}: ${n} new pending ${n === 1 ? "signup" : "signups"}. An older file may include already-completed signups. Check this file before restoring. Current pending entries are kept; contacts are not changed.`,
+      ),
+      h(
+        "pre",
+        { class: "card-body" },
+        found.queue
+          .flatMap((it) => (it.kind === "batch" ? it.emails : [it.email]))
+          .join("\n"),
+      ),
+      n
+        ? h(
+            "button",
+            {
+              class: "cta",
+              type: "button",
+              onclick: () => {
+                try {
+                  const added = importSignups(found.queue);
+                  preview.replaceChildren(
+                    h(
+                      "div",
+                      { class: "card-body" },
+                      `Restored ${added} pending ${added === 1 ? "signup" : "signups"}. Review the queue before adding anyone in Google Groups.`,
+                    ),
+                  );
+                } catch (err) {
+                  preview.append(
+                    h(
+                      "div",
+                      { class: "error" },
+                      `Could not restore: ${err.message}`,
+                    ),
+                  );
+                }
+              },
+            },
+            `Restore ${n} pending ${n === 1 ? "signup" : "signups"}`,
+          )
+        : h(
+            "div",
+            { class: "empty" },
+            "No new pending signups in this snapshot.",
+          ),
+    );
+  }
+  offer(readNewestSignupBackup());
+  return shell(
+    "On-device backups",
+    "Recover pending signups",
+    true,
+    h(
+      "div",
+      { class: "card-body" },
+      "Backups stay in Downloads/BGN Coordinator on this device. Nothing is restored automatically. Files can contain addresses already completed since the backup.",
+    ),
+    preview,
+    h(
+      "button",
+      {
+        class: "btn-secondary",
+        type: "button",
+        onclick: async () => {
+          const queue = await pickSignupBackup();
+          offer(queue ? { name: "Selected backup file", queue } : null);
+        },
+      },
+      "Choose a signup backup file",
+    ),
+  );
+}
+
 function homeScreen() {
   updateSlot = h("div");
   if (updateOffer) updateSlot.append(updateCard());
@@ -478,6 +580,11 @@ function homeScreen() {
     restoreCard(),
     nextEventCard(),
     queueCard(),
+    h(
+      "button",
+      { class: "link-btn", type: "button", onclick: () => go("signupRestore") },
+      "Recover pending signups",
+    ),
     // The agent status strip renders only when the agent has work (spec);
     // the Discord agent isn't connected yet, so there is nothing to show.
     sectionLabel("👇 Do a thing"),
@@ -961,8 +1068,8 @@ function drainScreen() {
       () => setConfirming(true),
     );
 
-    // Clearing the entries is irreversible and this queue is their only
-    // copy, so confirm first — same shape as the broadcast handoff.
+    // Clearing pending entries is deliberate; older backups may still hold
+    // them, but recovery must not automatically resurrect completed signups.
     const confirmBlock = h(
       "div",
       { class: "stack" },
@@ -1244,18 +1351,6 @@ const TEMPLATES = [
   },
 ];
 
-// Preview copy per spec §4, swapped with the selection. Editable before
-// sending (spec production note): the preview card IS a textarea styled as
-// the preview text, so editing needs no mode switch.
-const PREVIEWS = {
-  reminder:
-    "Subject: Wednesday at the Cambridge Library\n\nHi all — we're on for Wed Aug 5, 6–9pm, Lecture Hall. 34 RSVPs so far. Bring a game if you've got a favorite.",
-  announce:
-    "Subject: Next board game night — Aug 5\n\nWe've got the Lecture Hall at Cambridge Public Library, 6–9pm. Free, all levels. RSVP so we know how many tables to set.",
-  recap:
-    "Subject: Last night was a good one\n\nThanks to the 38 of you who came out. Heavy Wingspan energy. Photos below — next up Aug 5.",
-};
-
 // There is no live member count: consumer googlegroups.com groups have no
 // membership API (docs/adr/0002-self-serve-join-link.md). The batch dupe
 // check's local roster is the only count available — an empty stub until the
@@ -1267,10 +1362,56 @@ function broadcastScreen() {
   const count = memberCount();
   const reach = count ? `${count} members` : "the list";
 
+  const cache = loadCalendarCache();
+  const events = Array.isArray(cache?.events) ? cache.events : [];
+  const selection = h(
+    "select",
+    {
+      "aria-label": "Event",
+      onchange: () => {
+        attendance.value = "";
+        regenerate();
+      },
+    },
+    h("option", { value: "" }, "No event — write a custom draft"),
+    events.map((e, i) =>
+      h("option", { value: String(i) }, e.name || e.url || "Untitled event"),
+    ),
+  );
+  const attendance = h("input", {
+    type: "number",
+    min: "0",
+    step: "1",
+    "aria-label": "Actual attendance",
+    placeholder: "Enter actual attendance",
+    oninput: () => {
+      if (state.tpl === "recap") regenerate();
+    },
+  });
+  const attendanceRow = h(
+    "label",
+    { class: "stack" },
+    "Actual attendance (not RSVPs)",
+    attendance,
+  );
+  const ready = () =>
+    area.value.trim().length > 0 &&
+    (state.tpl !== "recap" || validAttendance(attendance.value));
+  function regenerate() {
+    area.value = eventDraft(
+      state.tpl,
+      events[selection.value],
+      attendance.value,
+    );
+    setConfirming(false);
+    grow();
+    refresh();
+  }
+
   const area = h("textarea", {
     class: "preview-area",
     "aria-label": "Preview",
-    value: PREVIEWS[state.tpl],
+    value: "",
     oninput: () => {
       grow();
       submit.update();
@@ -1286,9 +1427,9 @@ function broadcastScreen() {
       !area.value.trim()
         ? "Write something first"
         : count
-          ? `Send to ${count} members`
-          : "Send to the list",
-    () => area.value.trim().length > 0,
+          ? `Review draft for ${count} members`
+          : "Review mail draft",
+    ready,
     () => setConfirming(true),
   );
 
@@ -1304,7 +1445,7 @@ function broadcastScreen() {
     h(
       "div",
       { class: "card" },
-      h("div", { class: "card-title" }, "Send this message?"),
+      h("div", { class: "card-title" }, "Open this draft?"),
       h(
         "div",
         { class: "card-body" },
@@ -1328,7 +1469,7 @@ function broadcastScreen() {
     if (sendBtn.disabled) return;
     // The preview stays editable behind the confirm block, so re-check the
     // same emptiness guard the CTA enforces.
-    if (!area.value.trim()) {
+    if (!ready()) {
       setConfirming(false);
       return;
     }
@@ -1342,7 +1483,7 @@ function broadcastScreen() {
       sendBtn.disabled = false;
       return;
     }
-    addActivity(`Message sent to ${reach}`);
+    addActivity(`Opened mail draft for ${reach}`);
     go("done", { done: { kind: "message", reach } });
   }
 
@@ -1360,9 +1501,7 @@ function broadcastScreen() {
         type: "button",
         onclick: () => {
           state.tpl = t.id;
-          area.value = PREVIEWS[t.id]; // spec: preview content swaps with selection
-          grow();
-          refresh();
+          regenerate();
         },
       },
       h("div", { class: "tpl-title" }, t.title),
@@ -1370,6 +1509,10 @@ function broadcastScreen() {
     ),
   );
   function refresh() {
+    attendanceRow.hidden = state.tpl !== "recap";
+    // Author-level .stack display overrides the browser's default [hidden].
+    attendanceRow.style.display = attendanceRow.hidden ? "none" : "";
+    attendance.disabled = attendanceRow.hidden;
     tplButtons.forEach((b, i) =>
       b.classList.toggle("tpl-on", TEMPLATES[i].id === state.tpl),
     );
@@ -1386,6 +1529,18 @@ function broadcastScreen() {
     true,
     sectionLabel("Start from"),
     tplButtons,
+    h(
+      "label",
+      { class: "stack" },
+      "Event (last-known calendar — verify details)",
+      selection,
+    ),
+    h(
+      "div",
+      { class: "card-body" },
+      "Open Events from Home to refresh the calendar. Missing facts are omitted; you can write your own draft.",
+    ),
+    attendanceRow,
     h(
       "div",
       { class: "card preview-card" },
@@ -1846,8 +2001,8 @@ const DONE_COPY = {
   // composed mail to the coordinator's mail app, so the body says where the
   // message is rather than claiming a delivery the app can't see.
   message: (d) => [
-    "Message sent",
-    `Your mail app has the message — send it there to reach ${d.reach}. It'll also show up in the group archive.`,
+    "Draft opened in mail app",
+    `The mail-app handoff was accepted. Review and send there to reach ${d.reach}. This app cannot confirm delivery.`,
   ],
   // The app hands the add to Luma's own UI (ADR 0004), so the copy says
   // where things stand rather than claiming the calendar already shows it.
@@ -1936,6 +2091,7 @@ const SCREENS = {
   events: eventsScreen,
   add: addScreen,
   drain: drainScreen,
+  signupRestore: signupRestoreScreen,
   update: updateScreen,
   broadcast: broadcastScreen,
   done: doneScreen,

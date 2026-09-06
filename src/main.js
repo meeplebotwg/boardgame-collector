@@ -12,6 +12,7 @@ import { start } from "./router.js";
 import { render } from "./screens.js";
 import { listContacts } from "./contacts.js";
 import { writeBackup } from "./backup.js";
+import { backupSignups } from "./queue.js";
 
 // Adds queue on this device at the door and wait for the drain screen
 // (ADR 0005), so there is nothing to do at boot — the queue keeps them
@@ -22,4 +23,7 @@ start(render);
 // before the shared-storage bridge existed still gets its copy on disk.
 // Fire-and-forget, and past the first frame: the write is a run of blocking
 // JavascriptInterface hops into MediaStore, and Home must paint first.
-setTimeout(() => writeBackup(listContacts()), 0);
+setTimeout(() => {
+  writeBackup(listContacts());
+  backupSignups();
+}, 0);

@@ -7,6 +7,8 @@
 // app never sends or writes anything itself. localStorage survives app
 // restarts, so everything captured offline is still queued at home.
 
+import { writeSignupBackup, validSignups, mergeSignups } from "./backup.js";
+
 const KEY = "bgn.adds.v1";
 const DRAIN_KEY = "bgn.drainlog.v1";
 
@@ -20,10 +22,41 @@ function load() {
 
 function save(queue) {
   localStorage.setItem(KEY, JSON.stringify(queue));
+  setTimeout(() => writeSignupBackup(queue), 0);
+}
+
+function readableQueue() {
+  const value = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+  if (!validSignups(value))
+    throw new Error("Unreadable local signup queue; nothing changed.");
+  return value;
+}
+
+export function importSignups(incoming) {
+  const current = readableQueue();
+  const merged = mergeSignups(current, incoming);
+  const count = (queue) =>
+    queue.reduce(
+      (n, it) => n + (it.kind === "batch" ? it.emails.length : 1),
+      0,
+    );
+  const added = count(merged) - count(current);
+  if (added) save(merged);
+  return added;
+}
+
+export function backupSignups() {
+  try {
+    writeSignupBackup(readableQueue());
+  } catch {
+    /* Preserve unreadable local data. */
+  }
 }
 
 export function enqueue(intent) {
-  save([...load(), intent]);
+  const next = [...readableQueue(), intent];
+  if (!validSignups(next)) throw new Error("Invalid signup; nothing queued.");
+  save(next);
 }
 
 // Every queued address, flat, in capture (FIFO) order.
@@ -71,7 +104,7 @@ export const nextBatch = () => pendingAddresses().slice(0, remainingToday());
 export function markDrained(emails) {
   const left = [...emails];
   const next = [];
-  for (const it of load()) {
+  for (const it of readableQueue()) {
     if (it.kind === "batch") {
       const keep = it.emails.filter((e) => {
         const i = left.indexOf(e);

@@ -88,6 +88,122 @@ export function parseBackup(text) {
   }
 }
 
+// Signup snapshots deliberately use their own versioned envelope and names.
+// Legacy contact arrays/readers remain untouched. Never reuse a name: even
+// two saves in one millisecond must preserve the previous recovery snapshot.
+import { isValidEmail } from "./parse.js";
+
+const validAddress = (s) => typeof s === "string" && isValidEmail(s);
+export const validSignups = (queue) =>
+  Array.isArray(queue) &&
+  queue.every(
+    (it) =>
+      it &&
+      typeof it === "object" &&
+      ["name", "source"].every(
+        (key) => it[key] === undefined || typeof it[key] === "string",
+      ) &&
+      (it.kind === "one"
+        ? validAddress(it.email)
+        : it.kind === "batch" &&
+          Array.isArray(it.emails) &&
+          it.emails.length > 0 &&
+          it.emails.every(validAddress)),
+  );
+
+export function parseSignupBackup(text) {
+  try {
+    if (
+      typeof text !== "string" ||
+      new TextEncoder().encode(text).length > 1024 * 1024
+    )
+      return null;
+    const value = JSON.parse(text);
+    return value?.type === "bgn-signups" &&
+      value.version === 1 &&
+      validSignups(value.queue)
+      ? value.queue
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const addressKey = (email) => email.trim().toLowerCase();
+const addressesIn = (queue) =>
+  queue.flatMap((it) => (it.kind === "batch" ? it.emails : [it.email]));
+export function mergeSignups(current, incoming) {
+  if (!validSignups(current) || !validSignups(incoming))
+    throw new Error("Invalid signup queue; nothing imported.");
+  const seen = new Set(addressesIn(current).map(addressKey));
+  const result = [...current];
+  for (const it of incoming) {
+    const emails = addressesIn([it]).filter((email) => {
+      const key = addressKey(email);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (emails.length)
+      result.push(it.kind === "batch" ? { ...it, emails } : { ...it });
+  }
+  return result;
+}
+
+export function readNewestSignupBackup() {
+  try {
+    const b = bridge();
+    if (!b) return null;
+    for (const name of signupNames(JSON.parse(b.list())).reverse()) {
+      const queue = parseSignupBackup(b.read(name));
+      if (queue) return { name, queue };
+    }
+  } catch {
+    /* Unavailable storage. */
+  }
+  return null;
+}
+
+const SIGNUP_RE = /^bgn-signups-\d{13}-\d+\.json$/;
+const signupNames = (names) =>
+  names
+    .filter((n) => SIGNUP_RE.test(n))
+    .sort((a, b) => {
+      const [, , timeA, seqA] = a.replace(".json", "").split("-");
+      const [, , timeB, seqB] = b.replace(".json", "").split("-");
+      return Number(timeA) - Number(timeB) || Number(seqA) - Number(seqB);
+    });
+const signupFacts = (queue) =>
+  queue.flatMap((it) =>
+    addressesIn([it]).map((email) =>
+      JSON.stringify([addressKey(email), it.name ?? "", it.source ?? ""]),
+    ),
+  );
+export function writeSignupBackup(queue) {
+  try {
+    const b = bridge();
+    if (!b || !validSignups(queue)) return;
+    const names = signupNames(JSON.parse(b.list()));
+    // Logical time keeps saves newest even after clock rollback or a restart.
+    const previousTime = Number(names.at(-1)?.split("-")[2] ?? 0);
+    const time = Math.max(Date.now(), previousTime + 1);
+    const name = `bgn-signups-${time}-0.json`;
+    const text = JSON.stringify({ type: "bgn-signups", version: 1, queue });
+    if (!parseSignupBackup(text) || b.write(name, text)) return;
+    // Readback protects recovery even if a bridge reports a partial write as success.
+    if (b.read(name) !== text) return;
+    const covered = new Set(signupFacts(queue));
+    // Only pre-existing files are candidates; keep this save plus KEEP - 1 old.
+    for (const old of names.slice(0, 1 - KEEP)) {
+      const previous = parseSignupBackup(b.read(old));
+      if (previous && signupFacts(previous).every((fact) => covered.has(fact)))
+        b.remove(old);
+    }
+  } catch {
+    // Best effort, same on-device bridge as contacts.
+  }
+}
+
 /* ------------------------------ the bridge ------------------------------ */
 
 const bridge = () => globalThis.BgnBackup ?? null;
@@ -137,13 +253,15 @@ export function readNewestBackup() {
 // The explicit import: Android's own file picker, so a backup the app can no
 // longer see (a reinstall drops MediaStore ownership) is still reachable.
 // Resolves to the contact array, or null when cancelled or unreadable.
-export function pickBackup() {
+export const pickSignupBackup = () => pickBackup(parseSignupBackup);
+
+export function pickBackup(parse = parseBackup) {
   return new Promise((resolve) => {
     const b = bridge();
     if (!b?.pick) return resolve(null);
     globalThis.__bgnBackupPicked = (text) => {
       delete globalThis.__bgnBackupPicked;
-      resolve(text == null ? null : parseBackup(text));
+      resolve(text == null ? null : parse(text));
     };
     try {
       b.pick();
