@@ -59,17 +59,6 @@ export function cta(getLabel, getEnabled, ontap) {
   return { btn, update };
 }
 
-// Agent handoff row — appears at the bottom of every task screen.
-export function agentRow(label, ontap) {
-  return h(
-    "button",
-    { class: "agent-row", type: "button", onclick: ontap },
-    h("span", { class: "agent-row-emoji" }, "🤖"),
-    h("span", { class: "agent-row-text" }, label),
-    h("span", { class: "agent-row-chevron" }, "›"),
-  );
-}
-
 // Single-select chip row.
 export function chipRow(options, isSelected, onpick) {
   const buttons = options.map((o) =>

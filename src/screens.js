@@ -1,8 +1,7 @@
 // Screen renders: Home (spec §1), Add to mailing list (§2), Message the list
-// (§4), Add a community Luma event (§5), Save a contact (§6), Done (§8),
-// plus the agent screen stub (Discord agent not connected yet).
+// (§4), Add a community Luma event (§5), Save a contact (§6), Done (§8).
 
-import { h, header, sectionLabel, cta, agentRow, chipRow } from "./ui.js";
+import { h, header, sectionLabel, cta, chipRow } from "./ui.js";
 import {
   state,
   resetAdd,
@@ -67,16 +66,6 @@ import {
 } from "./backup.js";
 
 const SOURCES = ["At an event", "Discord", "Friend referral", "Website form"];
-
-// Agent handoff pre-fill text per flow (spec "Shared: Agent handoff row").
-// The agent screen is a stub in this build, but the pre-fill still arrives.
-const HANDOFF_TASK = {
-  add: "Add everyone who reacted 🎲 to the last #announcements post to the mailing list.",
-  batch:
-    "Take the emails I pasted, drop anyone already on the list, and invite the rest.",
-  message: "Finish this reminder draft and send it to the list Monday at 9am.",
-  luma: "Watch Luma for Boston tabletop events this week and add anything relevant to our calendar.",
-};
 
 function shell(kicker, title, cancel, ...body) {
   return h(
@@ -585,8 +574,6 @@ function homeScreen() {
       { class: "link-btn", type: "button", onclick: () => go("signupRestore") },
       "Recover pending signups",
     ),
-    // The agent status strip renders only when the agent has work (spec);
-    // the Discord agent isn't connected yet, so there is nothing to show.
     sectionLabel("👇 Do a thing"),
     ACTIONS.map(actionCard),
     sectionLabel("✨ Recent activity"),
@@ -838,10 +825,6 @@ function oneMode() {
     ),
     submit.btn,
     share.btn,
-    agentRow(
-      "Have the agent pull everyone who reacted 🎲 in Discord onto the list",
-      () => go("agent", { task: HANDOFF_TASK.add }),
-    ),
   );
 }
 
@@ -895,9 +878,6 @@ function batchMode() {
       h("div", { class: "batch-counts" }, countLeft, countRight),
     ),
     submit.btn,
-    agentRow("Have the agent dedupe this batch and invite the new ones", () =>
-      go("agent", { task: HANDOFF_TASK.batch }),
-    ),
   );
 }
 
@@ -1548,9 +1528,6 @@ function broadcastScreen() {
       area,
     ),
     tail,
-    agentRow("Have the agent finish this draft and send it Monday 9am", () =>
-      go("agent", { task: HANDOFF_TASK.message }),
-    ),
   );
 }
 
@@ -1785,10 +1762,6 @@ function lumaScreen() {
     dyn,
     submit.btn,
     notice,
-    agentRow(
-      "Have the agent watch Luma and add community events all week",
-      () => go("agent", { task: HANDOFF_TASK.luma }),
-    ),
   );
 }
 
@@ -1930,13 +1903,6 @@ function contactScreen() {
       ),
     ),
     submit.btn,
-    agentRow(
-      "Have the agent email them about hosting a night in September",
-      () =>
-        go("agent", {
-          task: `Email ${state.cName.trim() || "this contact"} about hosting a night in September.`,
-        }),
-    ),
     sectionLabel("Saved contacts"),
     saved,
     importRow(() => saved.replaceChildren(savedCard())),
@@ -2049,43 +2015,6 @@ function doneScreen(opts) {
   );
 }
 
-/* ---------------- Stubs: screens this build doesn't wire up ---------------- */
-
-function agentScreen(opts) {
-  return shell(
-    "#coordinators",
-    "Agent 🤖",
-    true,
-    h(
-      "div",
-      { class: "agent-banner" },
-      h("div", { class: "agent-banner-emoji" }, "🤖"),
-      h(
-        "div",
-        { class: "agent-banner-copy" },
-        h(
-          "div",
-          { class: "agent-banner-title" },
-          "Discord agent not connected",
-        ),
-        h(
-          "div",
-          { class: "agent-banner-sub" },
-          "When the agent runs in #coordinators, handed-off tasks will post there. This screen is a stub until then.",
-        ),
-      ),
-    ),
-    opts?.task
-      ? h(
-          "div",
-          { class: "card field-card" },
-          h("div", { class: "field-label" }, "Ask for something 🗣️"),
-          h("div", { class: "task-preview" }, opts.task),
-        )
-      : null,
-  );
-}
-
 const SCREENS = {
   home: homeScreen,
   events: eventsScreen,
@@ -2095,7 +2024,6 @@ const SCREENS = {
   update: updateScreen,
   broadcast: broadcastScreen,
   done: doneScreen,
-  agent: agentScreen,
   luma: lumaScreen,
   contact: contactScreen,
 };

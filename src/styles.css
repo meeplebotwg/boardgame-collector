@@ -18,7 +18,7 @@
   --ink: #1e1b17;
   --cta-disabled: #e7e3db;
   --link: #3273dc;
-  /* accent triples: mail / message / calendar / contacts / agent */
+  /* accent triples: mail / message / calendar / contacts */
   --mail-bg: #ffe9d2;
   --mail-border: #ffcfa6;
   --mail-text: #b34700;
@@ -32,13 +32,6 @@
   /* privacy banner (lighter greens than the contacts accent, per spec §6) */
   --privacy-bg: #f4faf6;
   --privacy-border: #dceee4;
-  --agent-bg: #f3f4fd;
-  --agent-border: #dddff6;
-  --agent-title: #2e3168;
-  --agent-sub: #55578f;
-  --agent-chip-border: #c9cbf0;
-  --agent-text: #3b3e7a;
-  --agent-chevron: #a9acd8;
   /* warm notice */
   --warm-bg: #fffdf9;
   --warm-border: #efe7da;
@@ -405,43 +398,6 @@ textarea.input {
   color: var(--mail-text);
 }
 
-/* Shared: Agent handoff row */
-.agent-row {
-  background: var(--surface);
-  border: 1px dashed var(--agent-chip-border);
-  border-radius: 12px;
-  padding: 13px 15px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-height: 44px;
-  width: 100%;
-  text-align: left;
-  transition: background 120ms ease;
-}
-
-.agent-row:hover {
-  background: #f8f8fe;
-}
-
-.agent-row-emoji {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.agent-row-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--agent-text);
-  line-height: 1.4;
-}
-
-.agent-row-chevron {
-  font-size: 17px;
-  color: var(--agent-chevron);
-}
-
 /* ------------------------------ Home ------------------------------ */
 
 .event-card {
@@ -794,53 +750,6 @@ button.event-card:active {
   font-size: 12.5px;
   color: var(--text-tertiary);
   line-height: 1.4;
-}
-
-/* --------------------------- Agent stub --------------------------- */
-
-.agent-banner {
-  background: var(--agent-bg);
-  border: 1px solid var(--agent-border);
-  border-radius: 14px;
-  padding: 14px 15px;
-  display: flex;
-  gap: 11px;
-  align-items: flex-start;
-}
-
-.agent-banner-emoji {
-  font-size: 16px;
-}
-
-.agent-banner-copy {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.agent-banner-title {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--agent-title);
-}
-
-.agent-banner-sub {
-  font-size: 12.5px;
-  color: var(--agent-sub);
-  line-height: 1.45;
-}
-
-.task-preview {
-  border: 1px solid var(--input-border);
-  border-radius: 10px;
-  padding: 12px;
-  font-size: 15px;
-  line-height: 1.45;
-  color: var(--text-primary);
-  background: var(--input-bg);
-  min-height: 92px;
-  white-space: pre-wrap;
 }
 
 /* --------------------------- Message the list --------------------------- */
