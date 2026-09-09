@@ -1,7 +1,7 @@
 {
   "name": "boardgame-coordinator",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Board Game Night WG Coordinator App — Tauri 2 Android WebView shell with bundled frontend",
   "type": "module",
   "scripts": {

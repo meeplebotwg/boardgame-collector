@@ -348,3 +348,253 @@ test("failed mail handoff keeps edited draft and records no activity", async () 
   assert.equal(button("Open in my mail app").disabled, false);
   assert.deepEqual(listActivity(), []);
 });
+
+// SYNTHETIC event-details UI fixtures. No live network or personal data.
+const detailEvent = {
+  eventId: "evt-SyntheticDetails",
+  name: "SYNTHETIC details",
+  slug: "synthetic-details",
+  startAt: "2099-09-09T18:00:00-04:00",
+  endAt: "2099-09-09T21:00:00-04:00",
+  venue: "SYNTHETIC Hall",
+  guestCount: 7,
+  fullAddress: "123 Example St, Testville, MA 00000, USA",
+  description: '<img src=x onerror="alert(1)"> SYNTHETIC details',
+};
+function cacheDetails(events = [detailEvent]) {
+  localStorage.setItem(
+    "bgn.calendar.v1",
+    JSON.stringify({ ts: Date.now(), events }),
+  );
+}
+const details = () =>
+  globalThis.document.querySelector("details.event-details");
+function offline(t) {
+  t.mock.method(globalThis, "fetch", async () => ({ ok: false, status: 503 }));
+  t.mock.method(console, "warn", () => {});
+}
+
+test("Upcoming cards use native summary with details/actions outside the toggle and untrusted text", async (t) => {
+  setup();
+  offline(t);
+  cacheDetails();
+  go("events");
+  const card = details();
+  assert.ok(card, "Upcoming card must be native details");
+  assert.equal(card.hasAttribute("open"), false);
+  const summary = card.querySelector("summary");
+  assert.match(summary.textContent, /SYNTHETIC details/);
+  assert.match(summary.textContent, /SYNTHETIC Hall/);
+  assert.match(summary.textContent, /7 RSVPs/);
+  assert.equal(summary.querySelector("button, a"), null);
+  assert.equal(card.querySelector("img"), null);
+  assert.match(card.querySelector(".event-description").textContent, /<img/);
+  assert.equal(
+    card.querySelector(".event-address").textContent,
+    detailEvent.fullAddress,
+  );
+  assert.ok(button("Copy address"));
+  assert.equal(
+    card.querySelector("a").getAttribute("href"),
+    "https://luma.com/synthetic-details",
+  );
+  await tick();
+});
+
+test("copy success waits for actual clipboard completion and link uses native opener without collapse", async (t) => {
+  const window = setup();
+  offline(t);
+  cacheDetails();
+  go("events");
+  await tick();
+  const card = details();
+  assert.ok(card);
+  card.setAttribute("open", "");
+  let finish;
+  const copied = [];
+  t.mock.method(navigator.clipboard, "writeText", (text) => {
+    copied.push(text);
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  button("Copy address").click();
+  assert.doesNotMatch(card.textContent, /Address copied/);
+  assert.equal(button("Copy address").disabled, true);
+  finish();
+  await tick();
+  assert.deepEqual(copied, [detailEvent.fullAddress]);
+  assert.match(
+    card.querySelector('[role="status"]').textContent,
+    /Address copied/,
+  );
+  assert.ok(card.hasAttribute("open"));
+  const calls = [];
+  window.__TAURI_INTERNALS__ = {
+    invoke: async (cmd, args) => calls.push({ cmd, args }),
+  };
+  try {
+    card.querySelector("a").click();
+    await tick();
+    assert.equal(calls[0].cmd, "plugin:opener|open_url");
+    assert.equal(calls[0].args.url, "https://luma.com/synthetic-details");
+    assert.ok(card.hasAttribute("open"));
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+  }
+});
+
+for (const unavailable of [false, true])
+  test(`clipboard ${unavailable ? "absent" : "denied"} gives selectable manual fallback, never false success`, async (t) => {
+    setup();
+    offline(t);
+    cacheDetails();
+    go("events");
+    await tick();
+    if (unavailable) delete navigator.clipboard;
+    else
+      t.mock.method(navigator.clipboard, "writeText", async () => {
+        throw new Error("denied");
+      });
+    assert.ok(button("Copy address"));
+    button("Copy address").click();
+    await tick();
+    assert.match(
+      details().querySelector('[role="status"]').textContent,
+      /select.*address.*copy/i,
+    );
+    assert.doesNotMatch(details().textContent, /Address copied/);
+    assert.equal(button("Copy address").disabled, false);
+    assert.equal(
+      details().querySelector(".event-address").textContent,
+      detailEvent.fullAddress,
+    );
+  });
+
+test("legacy cached fields degrade honestly and unsafe source URL cannot navigate", async (t) => {
+  const window = setup();
+  offline(t);
+  cacheDetails([
+    {
+      name: "SYNTHETIC legacy",
+      venue: "City only",
+      slug: "javascript:bad",
+      fullAddress: {},
+    },
+  ]);
+  go("events");
+  await tick();
+  assert.ok(details());
+  assert.match(details().textContent, /Full address unavailable/);
+  assert.equal(button("Copy address"), undefined);
+  assert.equal(details().querySelector(".event-description"), null);
+  const link = details().querySelector("a");
+  assert.equal(link.textContent, "Open Luma calendar");
+  link.click();
+  await tick();
+  assert.equal(window.location.href, "https://luma.com/boardgamenightwg");
+  assert.match(
+    globalThis.document.body.textContent,
+    /Couldn't reach the calendar — pulled/,
+  );
+});
+
+test("external event link remains original and opener failure is visible without collapse", async (t) => {
+  const window = setup();
+  offline(t);
+  cacheDetails([
+    { ...detailEvent, url: "https://example.org/event/123", hideRsvp: true },
+  ]);
+  go("events");
+  await tick();
+  const card = details();
+  assert.ok(card);
+  card.setAttribute("open", "");
+  assert.doesNotMatch(card.textContent, /7 RSVPs/);
+  const link = card.querySelector("a");
+  assert.equal(link.textContent, "Open original event");
+  assert.equal(link.getAttribute("href"), "https://example.org/event/123");
+  window.__TAURI_INTERNALS__ = {
+    invoke: async () => {
+      throw new Error("no browser");
+    },
+  };
+  try {
+    link.click();
+    await tick();
+    assert.match(card.textContent, /Couldn't open/);
+    assert.ok(card.hasAttribute("open"));
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+  }
+});
+
+for (const success of [false, true])
+  test(`cached expanded cards survive ${success ? "successful" : "failed"} revalidation`, async (t) => {
+    setup();
+    cacheDetails();
+    let finish;
+    t.mock.method(console, "warn", () => {});
+    t.mock.method(
+      globalThis,
+      "fetch",
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    go("events");
+    const card = details();
+    assert.ok(card);
+    card.setAttribute("open", "");
+    assert.match(globalThis.document.body.textContent, /Last known — pulled/);
+    const response = {
+      props: {
+        pageProps: {
+          initialData: {
+            data: {
+              featured_items: [
+                {
+                  event: {
+                    api_id: detailEvent.eventId,
+                    url: detailEvent.slug,
+                    name: "SYNTHETIC updated",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    finish({
+      ok: success,
+      status: 503,
+      text: async () =>
+        `<script id="__NEXT_DATA__">${JSON.stringify(response)}</script>`,
+    });
+    await tick();
+    assert.ok(details().hasAttribute("open"));
+    if (success) {
+      assert.match(details().textContent, /SYNTHETIC updated/);
+      (globalThis.document.querySelector(".event-note").style.display,
+        assert.match(
+          localStorage.getItem("bgn.calendar.v1"),
+          /SYNTHETIC updated/,
+        ));
+    } else {
+      assert.equal(
+        details(),
+        card,
+        "failed read must not replace usable cached DOM",
+      );
+      assert.match(
+        globalThis.document.body.textContent,
+        /Couldn't reach the calendar — pulled/,
+      );
+      assert.match(
+        localStorage.getItem("bgn.calendar.v1"),
+        /SYNTHETIC details/,
+      );
+    }
+  });

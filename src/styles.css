@@ -499,6 +499,72 @@ button.event-card:active {
   color: var(--text-tertiary);
 }
 
+/* Upcoming event details: native keyboard/touch disclosure, not Home navigation. */
+details.event-details {
+  display: block;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.event-details summary {
+  cursor: pointer;
+  padding: 16px;
+  min-height: 44px;
+}
+.event-details summary::marker {
+  color: var(--text-tertiary);
+}
+.event-details summary:focus-visible,
+.event-action:focus-visible {
+  outline: 2px solid var(--link, #3273dc);
+  outline-offset: 2px;
+}
+.event-details .event-title-row {
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.event-expand-hint {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.event-expanded {
+  border-top: 1px solid var(--divider);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.event-address,
+.event-description {
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.event-address-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.event-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--calendar-border);
+  border-radius: 10px;
+  background: var(--calendar-bg);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-decoration: none;
+}
+.event-expanded [role="status"]:empty {
+  display: none;
+}
+
 /* Home action cards — each tinted per the spec table */
 .action-card {
   background: var(--surface);

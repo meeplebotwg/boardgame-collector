@@ -1,4 +1,4 @@
-# 8. Events page — a separate scrollable page, not expand-in-place
+# 8. Events page — separate from Home, with expandable event details
 
 Date: 2026-08-31
 
@@ -20,8 +20,8 @@ listing all upcoming events — scrollable, one card per event, with every
 detail the public calendar surface carries (name, date/time range, venue,
 RSVP count when public, days-out pill).
 
-The captain explicitly considered and **rejected** the expand/contract-in-place
-alternative. Home stays the two-second orientation surface — one event, then
+The captain explicitly considered and **rejected** expanding the upcoming list
+inside the Home card. Home stays the two-second orientation surface — one event, then
 the actions. Do not re-litigate this choice without new information.
 
 The page consumes the same credential-free source as the card —
@@ -33,6 +33,20 @@ the card: the cached list renders instantly, stale data is always marked
 (`Last known — pulled …` in flight, `Couldn't reach the calendar — pulled …`
 after a failed read), and the empty / couldn't-reach states are as honest as
 the card's.
+
+## Amendment — 2026-09-09
+
+The captain requested expandable **individual cards on the Events page**. This
+is distinct from the rejected Home-list expansion. Native details/summary keeps
+keyboard and touch toggling built in. Expanded content includes public text
+description when present, a separately normalized full postal address with
+truthful copy feedback/manual fallback, and the actual Luma event link (or the
+original external HTTP(S) link / Luma calendar fallback). Missing, obfuscated,
+or registration-hidden addresses are never inferred from venue/city or exposed.
+Older cached entries remain readable without the new optional fields. Preserve
+open cards across the existing calendar revalidation when identity survives.
+No new fetches, credentials, maps integration, or dependencies. See README §1b
+for the acceptance contract; release/version changes remain a separate gate.
 
 ## Consequences
 

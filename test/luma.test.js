@@ -236,6 +236,9 @@ test("parseCalendarEvents pulls ids + slugs from the embedded upcoming list", ()
   assert.deepEqual(events[0], {
     eventId: "evt-FakeFakeFakeFak",
     slug: "fake1234",
+    url: "https://luma.com/fake1234",
+    fullAddress: null,
+    description: null,
     name: "Fixture Game Night",
     startAt: "2026-09-03T22:30:00.000Z",
     endAt: "2026-09-04T01:30:00.000Z",

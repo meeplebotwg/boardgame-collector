@@ -30,6 +30,8 @@ import {
   handOffLuma,
   loadCalendarCache,
   saveCalendarCache,
+  openEventPage,
+  calendarUrl,
 } from "./backend.js";
 import {
   normalizeLumaUrl,
@@ -39,6 +41,7 @@ import {
   nextUpcoming,
   upcomingEvents,
   daysOutLabel,
+  eventSourceUrl,
 } from "./luma.js";
 import {
   saveContact,
@@ -584,7 +587,7 @@ function homeScreen() {
 
 /* ----------------------------- 1b. Events page ---------------------------- */
 // The full upcoming list behind Home's next-event card (docs/adr/0008 —
-// captain decision: a separate scrollable page, not expand-in-place). Same
+// Home navigates here; individual event cards expand). Same
 // credential-free read and device cache as the card: the cached list
 // renders instantly, one fresh read runs on entry, and the empty/stale/
 // unreadable states are as honest as the card's.
@@ -600,22 +603,103 @@ function eventCard(e) {
       ? `${e.guestCount} ${e.guestCount === 1 ? "RSVP" : "RSVPs"}`
       : null,
   ].filter(Boolean);
+  const address = typeof e.fullAddress === "string" ? e.fullAddress.trim() : "";
+  const description =
+    typeof e.description === "string" ? e.description.trim() : "";
+  // Legacy caches carry only a Luma slug. Never manufacture a slug for a URL.
+  const source = eventSourceUrl(
+    e.url ?? e.slug,
+    e.url ? "external" : undefined,
+  );
+  const url = source ?? calendarUrl();
+  const status = h("div", {
+    class: "event-note",
+    role: "status",
+    "aria-live": "polite",
+  });
+  const copy = h(
+    "button",
+    {
+      type: "button",
+      class: "event-action",
+      onclick: async () => {
+        copy.disabled = true;
+        status.textContent = "";
+        try {
+          await navigator.clipboard.writeText(address);
+          status.textContent = "Address copied.";
+        } catch {
+          status.textContent =
+            "Couldn't copy — select the address above and copy it manually.";
+        } finally {
+          copy.disabled = false;
+        }
+      },
+    },
+    "Copy address",
+  );
+  const link = h(
+    "a",
+    {
+      class: "event-action",
+      href: url,
+      onclick: async (event) => {
+        event.preventDefault();
+        try {
+          await openEventPage(url);
+        } catch {
+          status.textContent = "Couldn't open the event link. Try again.";
+        }
+      },
+    },
+    !source
+      ? "Open Luma calendar"
+      : normalizeLumaUrl(source)
+        ? "Open in Luma"
+        : "Open original event",
+  );
   return h(
-    "div",
-    { class: "card" },
+    "details",
+    {
+      class: "card event-details",
+      "data-event-key": e.eventId || source || `${e.name}|${e.startAt}`,
+    },
+    h(
+      "summary",
+      {},
+      h(
+        "div",
+        { class: "event-title-row" },
+        h("div", { class: "event-title" }, e.name || "Untitled event"),
+        label == null ? null : h("span", { class: "pill" }, label),
+      ),
+      lines.length
+        ? h(
+            "div",
+            { class: "event-lines" },
+            lines.map((t) => h("div", { class: "event-line" }, t)),
+          )
+        : null,
+      h("span", { class: "event-expand-hint" }, "Details"),
+    ),
     h(
       "div",
-      { class: "event-title-row" },
-      h("div", { class: "event-title" }, e.name || "Untitled event"),
-      label == null ? null : h("span", { class: "pill" }, label),
+      { class: "event-expanded" },
+      description
+        ? h("div", { class: "event-description" }, description)
+        : null,
+      address
+        ? h(
+            "div",
+            { class: "event-address-block" },
+            h("div", { class: "field-label" }, "Full address"),
+            h("div", { class: "event-address" }, address),
+            copy,
+          )
+        : h("div", { class: "event-note" }, "Full address unavailable."),
+      link,
+      status,
     ),
-    lines.length
-      ? h(
-          "div",
-          { class: "event-lines" },
-          lines.map((t) => h("div", { class: "event-line" }, t)),
-        )
-      : null,
   );
 }
 
@@ -627,7 +711,20 @@ function eventsScreen() {
   const cache = loadCalendarCache();
   const cached = upcomingEvents(cache?.events);
 
-  const paintList = (events) => list.replaceChildren(...events.map(eventCard));
+  const paintList = (events) => {
+    const openKeys = new Set(
+      [...list.querySelectorAll("details[open]")].map(
+        (card) => card.dataset.eventKey,
+      ),
+    );
+    list.replaceChildren(
+      ...events.map((e) => {
+        const card = eventCard(e);
+        if (openKeys.has(card.dataset.eventKey)) card.setAttribute("open", "");
+        return card;
+      }),
+    );
+  };
   const paintMessage = (text) =>
     list.replaceChildren(
       h("div", { class: "card" }, h("div", { class: "empty" }, text)),
@@ -662,7 +759,7 @@ function eventsScreen() {
   // the network-failure path, so the cached list survives, marked stale.
   const paintUnreadable = () => {
     if (cached.length) {
-      paintList(cached);
+      // Keep usable cached DOM (open state, selection and in-flight copy).
       showNote(`Couldn't reach the calendar — pulled ${agoLabel(cache?.ts)}`);
     } else {
       hideNote();
