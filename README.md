@@ -121,7 +121,7 @@ Row labels (shown to the user, not the pre-fill):
 
 2. **Restore card** — only rendered on a launch that finds an empty contact book and a readable backup on the device. Card styling, title `Restore your contacts? 📇` over a body naming how many contacts a restore would actually add and which dated file they came from, then `Restore <n> contact(s)` and `Not now`; declining stays quiet for the rest of the session. The backup is the app's own copy in the phone's `Downloads/BGN Coordinator/` — nothing was sent anywhere (`docs/adr/0009-automatic-contact-backup.md`).
 
-3. **Next event card** — live from the group's public Luma calendar, the same credential-free read flow 3's dedupe uses (`fetchCalendarEvents()` in `src/backend.js`, one GET per Home entry; `docs/adr/0004-credential-free-luma-handoff.md`). It shows the soonest event that has not ended yet; every part degrades on its own when the calendar does not carry it. The whole card is tappable and opens the Events page (§1b) — a chevron in the title row advertises it; the expand-in-place alternative was considered and rejected (`docs/adr/0008-events-page.md`).
+3. **Next event card** — live from the group's public Luma calendar, the same credential-free read flow 3's dedupe uses (`fetchCalendarEvents()` in `src/backend.js`, one GET per Home entry; `docs/adr/0004-credential-free-luma-handoff.md`). It shows the soonest event that has not ended yet; every part degrades on its own when the calendar does not carry it. The whole card is tappable and opens the Events page (§1b) — a chevron in the title row advertises it; expanding the upcoming list inside this Home card was considered and rejected (`docs/adr/0008-events-page.md`).
    - Title row: `🎲 Next event` (15px, weight 700, `#222`) left; pill right — IBM Plex Mono 11px, `color #B34700`, `background #FFE9D2`, `border 1px solid #FFCFA6`, `border-radius 999px`, `padding 3px 9px`, text `Today` / `Tomorrow` / `<n> days out`, counted in the event's own timezone and hidden when the start can't be read — then the `›` chevron (`#C3BCB1`).
    - Lines, 14px `#444`: the event's name, the date and time range (`Wednesday, Aug 5 · 6:00–9:00 pm`; the end time drops when it is missing or the event runs overnight), then the venue (`Cambridge Public Library, Lecture Hall`). Each drops out when the calendar doesn't carry it.
    - Stat row: `border-top 1px solid #EFEBE3`, `padding-top 10px`, flex row `gap 26px`. Each stat = value (20px, weight 700, `#222`) over label (11px, `#8A8378`): **RSVPs**, only when the public calendar carries the count and the event doesn't hide it, then **On the list**, which waits on a member-count source of truth (the roster stub is empty, so it doesn't render yet). There is no **Capacity** stat: the public surface carries no capacity number, so the tile is omitted rather than faked — the prototype's 34/50/412 were placeholders.
@@ -159,9 +159,25 @@ Row labels (shown to the user, not the pre-fill):
 
 - Title row: event name (15px, weight 700, `#222`; `Untitled event` when the calendar doesn't carry one) left; the same days-out pill as Home (`Today` / `Tomorrow` / `<n> days out`), hidden when the start can't be read.
 - Lines, 14px `#444`: the date and time range, the venue, then `<n> RSVPs` — only when the public surface carries the count and the event doesn't hide it (same rule as Home; no capacity anywhere it's absent).
+- Cards on this page start collapsed. Tap/click the summary (or focus it and press Enter/Space) to expand/collapse public event details. Home's Next event still navigates here; it does not expand.
+- Expanded content shows any public description as text and a selectable full address with a `Copy address` button. Copy success is announced only after the clipboard write resolves; unavailable/denied clipboard access leaves the address selectable with a manual-copy instruction. A venue/city is not a full address: missing, obfuscated, or registration-hidden addresses show `Full address unavailable.` and no copy button.
+- `Open in Luma` opens the real Luma event URL through the existing external opener. External-calendar entries use `Open original event` with their safe original HTTP(S) URL, or `Open Luma calendar` if no event URL survives. Never fabricate a Luma slug from an external URL. Copy/link controls do not collapse the card.
+- No Maps SDK, embed, deep link, geocoding, or service changes: coordinators paste the copied address wherever they choose. No event-page fetches; details come from the same calendar read, with optional fields missing in older caches. Revalidation retains expanded cards where event identity survives.
 - An entry whose start can't be read sorts last rather than disappearing — unless its end date says it is already over.
 
 **Source and states:** the same credential-free read and device cache as Home's card (`fetchCalendarEvents()` / `bgn.calendar.v1`), one fresh read per page entry. The cached list renders instantly; states match the card's honesty — `Last known — pulled <n> min ago` above the list while the read is in flight, `Couldn't reach the calendar — pulled <n> min ago` once it fails, `Pulling events…` with a spinner when there is no cache yet, `Couldn't reach the calendar.` when there is no cache and the read fails, and `No upcoming events on the calendar.` when the read succeeds with an empty list. A failed read never overwrites the cache or claims the calendar is empty.
+
+**Verification:** `npm test` covers source normalization and DOM behavior. For
+real native disclosure/keyboard, clipboard, and 320/390/1280px layout checks,
+run `npm run dev -- --host 127.0.0.1 --port 4178 --strictPort`, then
+`python tools/event-details-smoke.py` in a Python environment with Playwright
+and Chromium installed (`python -m pip install playwright` and
+`python -m playwright install chromium`, preferably in a temporary venv).
+The smoke uses only labeled synthetic fixtures, writes screenshots under
+`/tmp/bgn-event-details-evidence`, and does not contact Luma or use real contacts.
+It verifies opener IPC with a test stub, not an Android external handler.
+Android WebView clipboard/paste and ACTION_VIEW still need a native-device smoke
+before release. Stop the temporary dev server after verification.
 
 ### 2. Add to mailing list
 

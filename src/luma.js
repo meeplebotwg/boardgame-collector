@@ -231,6 +231,31 @@ export function formatWhenRange(startAt, endAt, timezone) {
   return `${head} · ${s.clock} ${s.ampm}`;
 }
 
+// Calendar source URLs are untrusted, including those restored from old caches.
+// Only Luma entries may turn a bare slug into a URL. External URLs stay original.
+export function eventSourceUrl(raw, platform) {
+  const value = trimmed(raw);
+  // Explicitly reject controls at this untrusted URL boundary.
+  // eslint-disable-next-line no-control-regex
+  if (!value || /[\\\s\u0000-\u001f\u007f]/.test(value)) return null;
+  if (/^[a-zA-Z0-9_-]+$/.test(value))
+    return platform === "external" ? null : `https://luma.com/${value}`;
+  if (!/^https?:\/\//i.test(value)) return null;
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) return null;
+    if (/^(www\.)?(lu\.ma|luma\.com)$/i.test(url.hostname)) {
+      // Check the raw path too: URL() would silently normalize dot segments.
+      const path = value.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0];
+      if (!/^\/[a-zA-Z0-9_-]+\/?$/.test(path)) return null;
+      return `https://luma.com/${path.split("/")[1]}`;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 // Upcoming events embedded in the group calendar's public page — the
 // credential-free dedupe source, and the read Home's next-event card
 // renders from. Empty and unreadable are distinct: a recognized list that
@@ -243,7 +268,13 @@ export function parseCalendarEvents(html) {
   // featured_items sits at initialData.data on the calendars probed; fall
   // back to a shallow scan so a re-nested key degrades instead of breaking.
   const looksRight = (xs) =>
-    Array.isArray(xs) && xs.some((it) => it?.event?.api_id || it?.event?.url);
+    Array.isArray(xs) &&
+    xs.some(
+      (it) =>
+        it?.event?.api_id ||
+        it?.event?.url ||
+        (it?.platform === "external" && trimmed(it?.event?.name)),
+    );
   // Only a list we recognize, or an empty one, counts as read: a populated
   // list whose items we no longer recognize means the markup moved, and
   // must read as unreadable rather than as an empty calendar.
@@ -263,12 +294,16 @@ export function parseCalendarEvents(html) {
       // calendar entries have no JSON-LD of their own.
       const geo = ev?.geo_address_info;
       const guests = it?.guest_count ?? ev?.guest_count;
+      const addressPublic =
+        ["shown", "visible"].includes(geo?.mode) &&
+        (!ev?.geo_address_visibility || ev.geo_address_visibility === "public");
+      const url = eventSourceUrl(u, it?.platform);
       return {
         eventId: typeof ev?.api_id === "string" ? ev.api_id : null,
-        slug:
-          u && /^https?:\/\//i.test(u)
-            ? slugOf(u)
-            : slugOf(u ? `https://luma.com/${u}` : null),
+        slug: slugOf(url),
+        url,
+        fullAddress: addressPublic ? trimmed(geo?.full_address) : null,
+        description: trimmed(ev?.description),
         name: it?.name ?? ev?.name ?? null,
         // Home's next-event card renders from these; each stays null when
         // the page doesn't carry it and the card degrades around it.
@@ -276,7 +311,7 @@ export function parseCalendarEvents(html) {
         endAt: ev?.end_at ?? null,
         timezone: ev?.timezone ?? null,
         venue:
-          (geo && geo.mode !== "obfuscated" && geo.address) ||
+          (addressPublic && trimmed(geo?.address)) ||
           geo?.city_state ||
           geo?.city ||
           null,
@@ -287,7 +322,7 @@ export function parseCalendarEvents(html) {
         hideRsvp: Boolean(ev?.hide_rsvp),
       };
     })
-    .filter((e) => e.eventId || e.slug);
+    .filter((e) => e.eventId || e.url || e.name);
 }
 
 // The soonest entry that hasn't ended yet — an in-progress event still

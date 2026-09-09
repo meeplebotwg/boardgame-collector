@@ -115,7 +115,7 @@ export async function fetchLumaPage(url) {
   }
 }
 
-import { parseEventPage, parseCalendarEvents } from "./luma.js";
+import { parseEventPage, parseCalendarEvents, eventSourceUrl } from "./luma.js";
 
 // Preview of a pasted event link: one GET of the public page, parsed with
 // graceful per-field degradation (docs/adr/0004). Throws on network/HTTP
@@ -131,6 +131,13 @@ export async function fetchEventPreview(url) {
 // render both as "couldn't read" — and never block the add.
 export async function fetchCalendarEvents() {
   return parseCalendarEvents(await fetchLumaPage(calendarUrl()));
+}
+
+// Event-card link handoff: validate again at the external-opener boundary.
+export async function openEventPage(url) {
+  const safe = eventSourceUrl(url, "external");
+  if (!safe) throw new Error("Invalid event URL");
+  await openExternal(safe);
 }
 
 // Last successful calendar read, cached for Home's next-event card and the
