@@ -4,10 +4,11 @@
 // device with zero member action and no network. The coordinator later drains
 // them in Google Groups' own owner UI (the drain screen in src/screens.js
 // presents copy-ready blocks; marking a batch drained clears it here). The
-// app never sends or writes anything itself. localStorage survives app
+// capture path never sends. Explicit Send to Meeple is separate. localStorage survives app
 // restarts, so everything captured offline is still queued at home.
 
 import { writeSignupBackup, validSignups, mergeSignups } from "./backup.js";
+import { delegatedEmails } from "./handoff.js";
 
 const KEY = "bgn.adds.v1";
 const DRAIN_KEY = "bgn.drainlog.v1";
@@ -96,12 +97,22 @@ export const remainingToday = () => Math.max(0, DRAIN_LIMIT - drainedToday());
 
 // The batch the drain screen presents: the FIFO head, capped at what's left
 // of today's budget (empty once the budget is used up — drain the rest tomorrow).
-export const nextBatch = () => pendingAddresses().slice(0, remainingToday());
+export const nextBatch = () => {
+  const delegated = delegatedEmails();
+  return pendingAddresses()
+    .filter((e) => !delegated.has(e.trim().toLowerCase()))
+    .slice(0, remainingToday());
+};
 
 // The coordinator pasted this batch into Google's UI and submitted: drop one
 // occurrence of each address (FIFO) and count what was actually removed
 // against today's budget.
 export function markDrained(emails) {
+  const delegated = delegatedEmails();
+  if (emails.some((e) => delegated.has(e.trim().toLowerCase())))
+    throw Error(
+      "Meeple holds these signups; reconcile on host before manual action.",
+    );
   const left = [...emails];
   const next = [];
   for (const it of readableQueue()) {

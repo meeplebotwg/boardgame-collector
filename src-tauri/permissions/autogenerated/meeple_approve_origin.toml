@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-meeple-approve-origin"
+description = "Enables the meeple_approve_origin command without any pre-configured scope."
+commands.allow = ["meeple_approve_origin"]
+
+[[permission]]
+identifier = "deny-meeple-approve-origin"
+description = "Denies the meeple_approve_origin command without any pre-configured scope."
+commands.deny = ["meeple_approve_origin"]

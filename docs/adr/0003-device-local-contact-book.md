@@ -4,6 +4,12 @@ Date: 2026-08-15
 
 ## Status
 
+Extended by [ADR 0010](0010-private-meeple-handoff.md): saving/capture and
+on-device backups remain local, but explicit Send to Meeple shares selected
+records with a private receiver and may expose them to Meeple/model providers.
+The device-local/no-network claims below describe the original decision.
+
+
 Accepted (captain decision, 2026-08-15). Extended by ADR 0009 (2026-09-04):
 the book is also copied automatically to the device's own
 `Downloads/BGN Coordinator/`, because an uninstall or app-data clear wipes

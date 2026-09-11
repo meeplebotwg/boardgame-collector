@@ -6,3 +6,8 @@ dist/
 # Tauri
 *.apk
 *.keystore
+
+# Private receiver data/config must never be committed
+__pycache__/
+*.sqlite3*
+receiver/config*.json

@@ -1,9 +1,6 @@
-// The private contact book (Flow 4). Local and on-device only
-// (docs/adr/0003-device-local-contact-book.md) — same persistence approach as
-// the add queue (localStorage survives kill/relaunch). Deliberately separate
-// from the mailing-list queue/roster:
-// nothing here ever reaches backend.js's share/mail machinery, so the
-// privacy banner's promise holds by construction.
+// Private on-device contact capture, deliberately separate from mailing signups.
+// Saving never sends. Explicit Home → Send to Meeple exports selected records
+// through src/handoff.js (ADR 0010); backups stay on-device (ADR 0009).
 
 import { writeBackup, mergeContacts } from "./backup.js";
 

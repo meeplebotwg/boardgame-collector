@@ -7,7 +7,7 @@
 // the device-local queue at the door and drained at home in Google Groups'
 // own owner UI — the coordinator pastes the app's copy-ready blocks there
 // and submits. The app's only moves are clipboard copy and a browser
-// deep link; it never sends or writes anything itself. The self-serve join
+// deep link. Explicit private intake lives in handoff.js (ADR 0010). The self-serve join
 // link survives as a demoted secondary fallback (ADR 0002).
 
 import { isValidEmail } from "./parse.js";

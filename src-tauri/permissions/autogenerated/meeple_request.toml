@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-meeple-request"
+description = "Enables the meeple_request command without any pre-configured scope."
+commands.allow = ["meeple_request"]
+
+[[permission]]
+identifier = "deny-meeple-request"
+description = "Denies the meeple_request command without any pre-configured scope."
+commands.deny = ["meeple_request"]

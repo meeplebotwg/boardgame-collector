@@ -1,4 +1,9 @@
-/* Design tokens from the Coordinator App spec (README.md, "Design Tokens"). */
+/* Bundled Coordinator design tokens; historical prototype is visual reference. */
+/* Untrusted contact notes, email and receipt IDs must wrap on a phone. */
+.meeple-content {
+  overflow-wrap: anywhere;
+}
+
 :root {
   --page: #f6f4f0;
   --surface: #ffffff;
