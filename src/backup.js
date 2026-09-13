@@ -204,6 +204,120 @@ export function writeSignupBackup(queue) {
   }
 }
 
+// Notes snapshots use their own versioned envelope and names, same as the
+// signup snapshots above: never reuse a name, so even two saves in one
+// millisecond preserve the previous recovery snapshot (docs/adr/0011).
+
+const NOTES_RE = /^bgn-notes-\d{13}-\d+\.json$/;
+
+const validNote = (n) =>
+  n &&
+  typeof n === "object" &&
+  typeof n.id === "string" &&
+  n.id !== "" &&
+  typeof n.text === "string" &&
+  n.text.trim() !== "" &&
+  (n.ts === undefined ||
+    (Number.isFinite(n.ts) && n.ts >= 0 && n.ts <= 8.64e15));
+
+export const validNotes = (notes) =>
+  Array.isArray(notes) && notes.every(validNote);
+
+export function parseNotesBackup(text) {
+  try {
+    if (
+      typeof text !== "string" ||
+      new TextEncoder().encode(text).length > 1024 * 1024
+    )
+      return null;
+    const value = JSON.parse(text);
+    return value?.type === "bgn-notes" &&
+      value.version === 1 &&
+      validNotes(value.notes)
+      ? value.notes
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+// A note's identity for the covered-set prune: id PLUS text PLUS ts, so a
+// snapshot holding the pre-edit text of a note is never "covered" by a
+// book that has since been edited — it survives the keep window, the
+// ADR 0009 rule that keeps a rotation from eating the only copy.
+const noteFacts = (notes) =>
+  notes.map((n) => JSON.stringify([n.id, n.text, n.ts]));
+
+export function mergeNotes(current, incoming) {
+  if (!validNotes(current) || !validNotes(incoming))
+    throw new Error("Invalid notes list; nothing imported.");
+  const seen = new Set(current.map((n) => n.id));
+  const result = [...current];
+  for (const n of incoming) {
+    if (seen.has(n.id)) continue; // the in-app copy always wins
+    seen.add(n.id);
+    result.push({ ...n, ts: Number(n.ts) || Date.now() });
+  }
+  return result.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0));
+}
+
+const noteNames = (names) =>
+  names
+    .filter((n) => NOTES_RE.test(n))
+    .sort((a, b) => {
+      const [, , timeA, seqA] = a.replace(".json", "").split("-");
+      const [, , timeB, seqB] = b.replace(".json", "").split("-");
+      return Number(timeA) - Number(timeB) || Number(seqA) - Number(seqB);
+    });
+
+export function writeNotesBackup(notes) {
+  try {
+    const b = bridge();
+    if (!b || !validNotes(notes) || !notes.length) return;
+    const names = noteNames(JSON.parse(b.list()));
+    // Logical time keeps saves newest even after clock rollback or a restart.
+    const previousTime = Number(names.at(-1)?.split("-")[2] ?? 0);
+    const time = Math.max(Date.now(), previousTime + 1);
+    const name = `bgn-notes-${time}-0.json`;
+    const text = JSON.stringify({ type: "bgn-notes", version: 1, notes });
+    if (!parseNotesBackup(text) || b.write(name, text)) return;
+    // Readback protects recovery even if a bridge reports a partial write as success.
+    if (b.read(name) !== text) return;
+    const covered = new Set(noteFacts(notes));
+    // Only pre-existing files are candidates; keep this save plus KEEP - 1 old.
+    for (const old of names.slice(0, 1 - KEEP)) {
+      const previous = parseNotesBackup(b.read(old));
+      if (previous && noteFacts(previous).every((fact) => covered.has(fact)))
+        b.remove(old);
+    }
+  } catch {
+    // Best effort, same on-device bridge as contacts and signups.
+  }
+}
+
+// The newest READABLE notes backup as { name, notes }, or null. A kill
+// between MediaStore's insert and the stream write leaves a zero-byte file
+// that is newest by name — walk back through the older copies rather than
+// dropping the restore offer entirely.
+export function readNewestNotesBackup() {
+  try {
+    const b = bridge();
+    if (!b) return null;
+    for (const name of noteNames(JSON.parse(b.list())).reverse()) {
+      const notes = parseNotesBackup(b.read(name));
+      if (notes?.length) return { name, notes };
+    }
+  } catch {
+    /* Unavailable storage. */
+  }
+  return null;
+}
+
+// The explicit import: Android's own file picker, so a notes backup the app
+// can no longer see (a reinstall drops MediaStore ownership) is still
+// reachable. Resolves to the note array, or null when cancelled/unreadable.
+export const pickNotesBackup = () => pickBackup(parseNotesBackup);
+
 /* ------------------------------ the bridge ------------------------------ */
 
 const bridge = () => globalThis.BgnBackup ?? null;
@@ -258,7 +372,8 @@ export const pickSignupBackup = () => pickBackup(parseSignupBackup);
 export function pickBackup(parse = parseBackup) {
   return new Promise((resolve) => {
     const b = bridge();
-    if (!b?.pick) return resolve(null);
+    // The native picker has one callback shared by contacts, signups and notes.
+    if (!b?.pick || globalThis.__bgnBackupPicked) return resolve(null);
     globalThis.__bgnBackupPicked = (text) => {
       delete globalThis.__bgnBackupPicked;
       resolve(text == null ? null : parse(text));

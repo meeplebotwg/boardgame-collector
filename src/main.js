@@ -12,6 +12,7 @@ import { start } from "./router.js";
 import { render } from "./screens.js";
 import { listContacts } from "./contacts.js";
 import { writeBackup } from "./backup.js";
+import { backupNotes } from "./notes.js";
 import { backupSignups } from "./queue.js";
 
 // Adds queue on this device at the door and wait for the drain screen
@@ -26,4 +27,5 @@ start(render);
 setTimeout(() => {
   writeBackup(listContacts());
   backupSignups();
+  backupNotes();
 }, 0);

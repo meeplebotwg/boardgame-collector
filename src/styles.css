@@ -780,6 +780,29 @@ details.event-details {
   font-family: var(--mono);
 }
 
+.note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.notes-restore,
+.notes-screen {
+  overflow-wrap: anywhere;
+}
+.notes-screen .header-action {
+  min-height: 44px;
+}
+.general-note-area {
+  min-height: 130px;
+}
+.notes-screen textarea:focus-visible,
+.notes-screen button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
 .notes-area {
   font-size: 15px;
   min-height: 110px;

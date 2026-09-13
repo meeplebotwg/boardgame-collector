@@ -2,6 +2,7 @@
 // (§4), Add a community Luma event (§5), Save a contact (§6), Done (§8).
 
 import { h, header, sectionLabel, cta, chipRow } from "./ui.js";
+import { notesScreen, notesRestoreCard } from "./notes-screen.js";
 import { handoffScreen } from "./handoff-screen.js";
 import {
   state,
@@ -126,6 +127,13 @@ const ACTIONS = [
     title: "Save a contact",
     sub: "Venue, sponsor, or vendor — not the list",
     screen: "contact",
+  },
+  {
+    icon: "📝",
+    cls: "action-mail",
+    title: "Take a note",
+    sub: "A private scratchpad for anything",
+    screen: "notes",
   },
 ];
 
@@ -578,6 +586,7 @@ function homeScreen() {
     false,
     updateSlot,
     restoreCard(),
+    notesRestoreCard(() => render("home")),
     nextEventCard(),
     queueCard(),
     h(
@@ -2150,6 +2159,7 @@ function doneScreen(opts) {
 }
 
 const SCREENS = {
+  notes: notesScreen,
   meeple: handoffScreen,
   home: homeScreen,
   events: eventsScreen,
