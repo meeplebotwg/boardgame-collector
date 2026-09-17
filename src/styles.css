@@ -669,6 +669,17 @@ details.event-details {
   border-color: var(--contact-border);
 }
 
+/* Club website card on Home — calendar-purple accent (external, like Luma) */
+.action-website .tile {
+  background: var(--calendar-bg);
+  border-color: var(--calendar-border);
+}
+
+.action-website:hover {
+  border-color: var(--calendar-border);
+  background: #fdfcff;
+}
+
 .action-contact:hover {
   border-color: var(--contact-border);
   background: #fbfefc;

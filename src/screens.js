@@ -27,6 +27,7 @@ import {
   handOffBroadcast,
   handOffJoinLink,
   openMembersPage,
+  openWebsite,
   fetchEventPreview,
   fetchCalendarEvents,
   handOffLuma,
@@ -398,6 +399,43 @@ function queueCard() {
   );
 }
 
+// The club's public website, one tap from Home: chapters, events, FAQ.
+// Plain external handoff (same ACTION_VIEW path as the members-page deep
+// link) — the app never embeds the site. A failed handoff says so on the
+// card instead of failing silently.
+function websiteCard() {
+  const sub = h(
+    "span",
+    { class: "action-sub" },
+    "boardgamenightwg.com — chapters, events, FAQ",
+  );
+  return h(
+    "button",
+    {
+      class: "action-card action-website",
+      type: "button",
+      onclick: async () => {
+        try {
+          await openWebsite();
+        } catch (err) {
+          console.warn(
+            `[home] couldn't open the website: ${err?.message ?? err}`,
+          );
+          sub.textContent = "Couldn't open the browser. Try again.";
+        }
+      },
+    },
+    h("span", { class: "tile" }, "🌐"),
+    h(
+      "span",
+      { class: "action-text" },
+      h("span", { class: "action-title" }, "Club website"),
+      sub,
+    ),
+    h("span", { class: "action-chevron" }, "›"),
+  );
+}
+
 // The installed version — same source as the self-updater's current version
 // (__APP_VERSION__, inlined from src-tauri/tauri.conf.json by Vite,
 // docs/adr/0006), one version truth. Tapping it reveals the last update
@@ -596,6 +634,7 @@ function homeScreen() {
     ),
     sectionLabel("👇 Do a thing"),
     ACTIONS.map(actionCard),
+    websiteCard(),
     sectionLabel("✨ Recent activity"),
     recentCard(),
     versionFooter(),

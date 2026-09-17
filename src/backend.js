@@ -14,6 +14,15 @@ import { isValidEmail } from "./parse.js";
 
 export const JOIN_LINK = "https://groups.google.com/g/bgn-wg/about";
 export const JOIN_MAIL = "bgn-wg+subscribe@googlegroups.com";
+// The club's public site (chapters, events, FAQ). Home's "Club website"
+// card is a plain external handoff — the same ACTION_VIEW pattern as the
+// members-page deep link; the app never embeds or writes to it.
+export const WEBSITE_URL = "https://boardgamenightwg.com/";
+
+export async function openWebsite() {
+  await openExternal(WEBSITE_URL);
+}
+
 // The group's owner UI — the drain screen's deep-link target and the ONLY
 // write path for adds: the coordinator is signed in there, the app just
 // opens the page.
