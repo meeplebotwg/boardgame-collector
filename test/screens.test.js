@@ -598,3 +598,25 @@ for (const success of [false, true])
       );
     }
   });
+
+test("Home offers the club website as an external handoff", async () => {
+  const window = setup();
+  globalThis.__APP_VERSION__ = "0.0.0-test";
+  const old = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 503 });
+  try {
+    render("home");
+    const card = [
+      ...globalThis.document.querySelectorAll(".action-website"),
+    ].find(
+      (b) => b.querySelector(".action-title").textContent === "Club website",
+    );
+    assert.ok(card, "Home should show a Club website card");
+    assert.equal(window.location.href, "");
+    card.click();
+    await tick();
+    assert.equal(window.location.href, "https://boardgamenightwg.com/");
+  } finally {
+    globalThis.fetch = old;
+  }
+});
