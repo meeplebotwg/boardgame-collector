@@ -55,6 +55,20 @@ live. The default local processing command honestly marks the login gate blocked
 Actual processing needs an owner Google session and working computer-use access.
 No cron/unattended worker or global Hermes webhook is enabled.
 
+Receipt history shows **submission received**, **first record received**, **date
+actually added**, and **last membership verification recorded**, in UTC. Use
+**Refresh outcomes** manually; these are not push notifications. Unknown dates
+stay Unknown (including legacy records and an already-member's original add date).
+Failed refresh keeps last-known values, not a new confirmation. Verification is
+the local recording time of an operator-attested observation, not an independent
+Google check. The ledger is historical reconciliation evidence, **not a complete
+or current membership roster, a broadcast send-list, or authority to re-add an
+unsubscribed address**. See [ADR 0012](docs/adr/0012-private-signup-ledger.md).
+
+The hybrid scripted Groups worker plus Meeple exceptions remains gated on an
+observed, authenticated owner UI. It is not implemented here: actual processing
+still uses the existing human-gated Hermes path, not a guessed browser adapter.
+
 All originals stay on the phone. Delegated signup addresses are excluded from
 manual drain (including after receipt/outcome) to prevent manual/agent races.
 Reconcile on the host rather than running parallel Google adds. If processing was
@@ -132,7 +146,28 @@ python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" read "$JOB"
 python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" run "$JOB"
 # Locally record a verified outcome; evidence file is private, not PII in argv.
 python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" set "$JOB" "$ITEM" blocked --evidence-file "$EVIDENCE"
+# If an actual addition time is known, supply it explicitly (timezone required).
+# Omit --added-at if unknown; never substitute the later confirmation time.
+python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" set "$JOB" "$ITEM" added --evidence-file "$EVIDENCE" --added-at "$KNOWN_RFC3339_TIME"
+# Exclusive 0600 files; protect the parent directory and never put these in Git.
+python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" export --output "$NEW_PRIVATE_JSON"
+python3 receiver/meeple_receiver.py --data "$PRIVATE_DIR" backup --output "$NEW_PRIVATE_SQLITE"
 ```
+
+The JSON export groups signup work by owner/group/normalized email and retains all
+original captures, names, sources, submission receipts and outcome/attempt audit.
+It excludes private contacts. The SQLite backup uses the backup API and includes
+the **whole** existing store (contacts too); both files are PII, not public reports.
+Neither output can overwrite a file or symlink. No HTTP roster/export route exists.
+Receipt replay never resets dates. Re-verification preserves a known addition
+date; a conflicting date is rejected, leaving prior evidence intact.
+
+On a separately approved upgrade, stop the old receiver/processor before using
+the new CLI or server. Back up the existing database first using SQLite's backup
+API (not a live raw file copy). Schema migration is transactional and adds only
+nullable columns; existing dates are not reconstructed from `updated`. Do not run
+the old writer against the migrated schema. Restore requires stopping writers and
+deliberate owner reconciliation; restoring an old backup is not Google state.
 
 Only after review, a new dedicated Tailscale Serve HTTPS port may point to this
 **127.0.0.1-only** receiver. Never use Funnel or change existing 443/8443 services.

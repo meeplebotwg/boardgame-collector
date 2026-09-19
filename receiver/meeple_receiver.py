@@ -1,6 +1,7 @@
 """Private, loopback-only BGN intake. No public processing/mutation endpoint."""
 import argparse
 from contextlib import contextmanager
+from datetime import datetime
 import fcntl
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
@@ -75,6 +76,18 @@ class Store:
                 CREATE TABLE IF NOT EXISTS outcomes (owner TEXT, target TEXT, status TEXT, evidence TEXT, updated INTEGER, PRIMARY KEY(owner,target));
                 CREATE TABLE IF NOT EXISTS audit (owner TEXT, target TEXT, status TEXT, evidence TEXT, updated INTEGER);
             ''')
+            # Nullable migration: old updated/audit values cannot prove receipt or add dates.
+            db.execute('BEGIN IMMEDIATE')
+            for table, columns in {
+                'jobs': {'received_at': 'INTEGER'},
+                'records': {'received_at': 'INTEGER'},
+                'outcomes': {'received_at': 'INTEGER', 'added_at': 'INTEGER', 'verified_at': 'INTEGER'},
+                'audit': {'added_at': 'INTEGER', 'verified_at': 'INTEGER', 'job': 'TEXT', 'record': 'TEXT'},
+            }.items():
+                existing = {r['name'] for r in db.execute(f'PRAGMA table_info({table})')}
+                for column, kind in columns.items():
+                    if column not in existing:
+                        db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {kind}')
 
     @contextmanager
     def connect(self):
@@ -98,47 +111,115 @@ class Store:
                     raise Conflict()
                 return previous['id'], False
             job = uuid.uuid4().hex
-            db.execute('INSERT INTO jobs VALUES (?,?,?,?)', (job, owner, value['key'], body))
+            now = int(time.time())
+            db.execute('INSERT INTO jobs (id,owner,key,body,received_at) VALUES (?,?,?,?,?)', (job, owner, value['key'], body, now))
             for pos, rec in enumerate(value['records']):
                 facts = canonical(rec)
                 previous = db.execute('SELECT body FROM records WHERE owner=? AND id=?', (owner, rec['id'])).fetchone()
                 if previous and previous['body'] != facts:
                     raise Conflict()
                 target = 'signup:' + GROUP + ':' + rec['email'].strip().lower() if rec['kind'] == 'signup' else 'contact:' + rec['id']
-                db.execute('INSERT OR IGNORE INTO records VALUES (?,?,?,?)', (owner, rec['id'], facts, target))
+                db.execute('INSERT OR IGNORE INTO records (owner,id,body,target,received_at) VALUES (?,?,?,?,?)', (owner, rec['id'], facts, target, now))
                 db.execute('INSERT INTO items VALUES (?,?,?)', (job, rec['id'], pos))
                 state = 'received' if rec['kind'] == 'signup' else 'stored_contact'
-                db.execute('INSERT OR IGNORE INTO outcomes VALUES (?,?,?,?,?)', (owner, target, state, '', int(time.time())))
+                db.execute('INSERT OR IGNORE INTO outcomes (owner,target,status,evidence,updated,received_at) VALUES (?,?,?,?,?,?)', (owner, target, state, '', now, now))
         return job, True
 
     def list_jobs(self):
         with self.connect() as db:
-            return [dict(r) for r in db.execute('SELECT id,owner FROM jobs ORDER BY rowid')]
+            return [dict(r) for r in db.execute('SELECT id,owner,received_at FROM jobs ORDER BY rowid')]
 
     def read(self, job, owner=None):
         if not isinstance(job, str) or not JOB.fullmatch(job):
             raise ValueError('Invalid job ID')
         with self.connect() as db:
-            row = db.execute('SELECT owner FROM jobs WHERE id=?', (job,)).fetchone()
+            row = db.execute('SELECT owner,received_at FROM jobs WHERE id=?', (job,)).fetchone()
             if not row or (owner is not None and row['owner'] != owner):
                 raise KeyError('Unknown job')
-            rows = db.execute('''SELECT r.id,r.body,o.status,o.evidence,o.updated FROM items i
+            rows = db.execute('''SELECT r.id,r.body,r.received_at,o.status,o.evidence,o.updated,o.added_at,o.verified_at FROM items i
                 JOIN records r ON r.id=i.record AND r.owner=?
                 JOIN outcomes o ON o.target=r.target AND o.owner=r.owner
                 WHERE i.job=? ORDER BY i.position''', (row['owner'], job))
-            return {'job': job, 'items': [{'id': r['id'], 'record': json.loads(r['body']), 'status': r['status'], 'evidence': r['evidence'], 'updated': r['updated']} for r in rows]}
+            return {'job': job, 'received_at': row['received_at'], 'items': [dict(
+                {k: r[k] for k in ('id', 'status', 'evidence', 'updated', 'received_at', 'added_at', 'verified_at')},
+                record=json.loads(r['body'])) for r in rows]}
 
-    def set_outcome(self, job, item, status, evidence):
+    def set_outcome(self, job, item, status, evidence, added_at=None):
         if status not in OUTCOMES or not isinstance(evidence, str) or not evidence.strip() or len(evidence) > 2000:
             raise ValueError('Outcome requires bounded evidence')
         current = self.read(job)
         if not any(r['id'] == item and r['record']['kind'] == 'signup' for r in current['items']):
             raise ValueError('Only a signup can receive a membership outcome')
+        now = int(time.time())
+        verified_at = now if status in {'added', 'already_member'} else None
+        if added_at is not None and (verified_at is None or type(added_at) is not int or not 0 <= added_at <= now):
+            raise ValueError('Actual addition time requires a successful observation and a non-future timestamp')
         with self.connect() as db:
-            row = db.execute('SELECT r.owner,r.target FROM records r JOIN jobs j ON j.owner=r.owner WHERE j.id=? AND r.id=?', (job, item)).fetchone()
-            now = int(time.time())
-            db.execute('UPDATE outcomes SET status=?,evidence=?,updated=? WHERE owner=? AND target=?', (status, evidence.strip(), now, row['owner'], row['target']))
-            db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (row['owner'], row['target'], status, evidence.strip(), now))
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('''SELECT r.owner,r.target,o.added_at FROM records r
+                JOIN jobs j ON j.owner=r.owner JOIN outcomes o ON o.owner=r.owner AND o.target=r.target
+                WHERE j.id=? AND r.id=?''', (job, item)).fetchone()
+            if added_at is not None and row['added_at'] is not None and row['added_at'] != added_at:
+                raise ValueError('Known addition time conflicts; reconcile evidence without overwriting history')
+            db.execute('''UPDATE outcomes SET status=?,evidence=?,updated=?,
+                added_at=COALESCE(added_at,?),verified_at=COALESCE(?,verified_at)
+                WHERE owner=? AND target=?''', (status, evidence.strip(), now, added_at, verified_at, row['owner'], row['target']))
+            db.execute('''INSERT INTO audit (owner,target,status,evidence,updated,added_at,verified_at,job,record)
+                VALUES (?,?,?,?,?,?,?,?,?)''', (row['owner'], row['target'], status, evidence.strip(), now, added_at, verified_at, job, item))
+
+    def export(self, output):
+        # One snapshot, one row per membership target, all original captures and attempts.
+        with self.connect() as db:
+            db.execute('BEGIN')
+            memberships = []
+            for outcome in db.execute("SELECT * FROM outcomes WHERE target LIKE 'signup:%' ORDER BY rowid"):
+                owner, target = outcome['owner'], outcome['target']
+                entry = {k: outcome[k] for k in ('owner', 'status', 'evidence', 'updated', 'received_at', 'added_at', 'verified_at')}
+                _, entry['group'], entry['email'] = target.split(':', 2)
+                entry['captures'] = []
+                for record in db.execute('SELECT * FROM records WHERE owner=? AND target=? ORDER BY rowid', (owner, target)):
+                    submissions = [dict(r) for r in db.execute('''SELECT j.id AS job,j.received_at
+                        FROM items i JOIN jobs j ON i.job=j.id WHERE j.owner=? AND i.record=? ORDER BY j.rowid''', (owner, record['id']))]
+                    entry['captures'].append({'record': json.loads(record['body']), 'received_at': record['received_at'], 'submissions': submissions})
+                entry['audit'] = [dict(r) for r in db.execute('''SELECT status,evidence,updated,added_at,verified_at,job,record
+                    FROM audit WHERE owner=? AND target=? ORDER BY rowid''', (owner, target))]
+                memberships.append(entry)
+        with private_output(output) as out:
+            json.dump({'version': 1, 'memberships': memberships}, out, ensure_ascii=False, indent=2)
+            out.write('\n')
+
+    def backup(self, output):
+        # SQLite backup API, not a file copy that can miss an in-flight journal.
+        with private_output(output):
+            with self.connect() as source:
+                dest = sqlite3.connect(output)
+                try:
+                    source.backup(dest)
+                finally:
+                    dest.close()
+
+
+@contextmanager
+def private_output(path):
+    # Exclusive creation also rejects symlinks; parent directory is operator-owned.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, 'w') as out:
+            yield out
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        Path(path).unlink()
+        raise
+
+
+def added_timestamp(value):
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})', value):
+        raise argparse.ArgumentTypeError('Use RFC3339 with seconds and timezone, e.g. 2020-01-02T03:04:05Z')
+    try:
+        return int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError('Invalid addition timestamp') from exc
 
 
 def make_server(store, config_path):
@@ -196,7 +277,7 @@ def make_server(store, config_path):
                     return value
                 value = json.loads(body, object_pairs_hook=unique)
                 job, created = store.intake(owners[0], value)
-                return self.reply(201 if created else 200, {'job': job})
+                return self.reply(201 if created else 200, {'job': job, 'received_at': store.read(job, owners[0])['received_at']})
             except KeyError:
                 self.reply(404, {'error': 'Not found'})
             except Conflict:
@@ -270,6 +351,10 @@ def main():
     sub.add_parser('list')
     read = sub.add_parser('read'); read.add_argument('job')
     put = sub.add_parser('set'); put.add_argument('job'); put.add_argument('item'); put.add_argument('status', choices=sorted(OUTCOMES)); put.add_argument('--evidence-file', required=True, type=Path)
+    put.add_argument('--added-at', type=added_timestamp, help='Known actual addition time (RFC3339); omitted means unknown, never now')
+    for name in ('export', 'backup'):
+        command = sub.add_parser(name)
+        command.add_argument('--output', required=True, type=Path, help='New private file outside source/public folders; never overwritten')
     run = sub.add_parser('run'); run.add_argument('job'); run.add_argument('--owner-session-ready', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
@@ -285,7 +370,11 @@ def main():
     elif args.command == 'read':
         print(canonical(store.read(args.job)))
     elif args.command == 'set':
-        store.set_outcome(args.job, args.item, args.status, args.evidence_file.read_text())
+        store.set_outcome(args.job, args.item, args.status, args.evidence_file.read_text(), added_at=args.added_at)
+    elif args.command == 'export':
+        store.export(args.output)
+    elif args.command == 'backup':
+        store.backup(args.output)
     else:
         print(run_job(store, args.job, args.owner_session_ready))
 

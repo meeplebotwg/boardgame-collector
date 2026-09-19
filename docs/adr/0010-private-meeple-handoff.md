@@ -2,6 +2,10 @@
 
 Status: implementation proposed for review; production activation gated.
 
+Extended by [ADR 0012](0012-private-signup-ledger.md): nullable receipt/addition/
+verification timestamps and private reconciliation export in the same SQLite
+store. This does not implement the live-UI-gated hybrid Groups worker.
+
 ## Outcome and non-goals
 
 Home → Send to Meeple → select NEW signups/private contacts → durable phone

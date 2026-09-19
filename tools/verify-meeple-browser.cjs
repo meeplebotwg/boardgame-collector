@@ -157,6 +157,43 @@ const assert = require("node:assert/strict");
       [],
       "ineligible records must wrap too",
     );
+    // Synthetic status transport only: this does not submit anything to Google.
+    await page.evaluate(async () => {
+      const handoff = await import("/src/handoff.js");
+      const { handoffScreen } = await import("/src/handoff-screen.js");
+      await handoff.send(async () => ({ job: "a".repeat(32), received_at: 100 }));
+      let refreshes = 0;
+      const request = async () => {
+        refreshes++;
+        if (refreshes > 2) throw Error("Synthetic offline refresh");
+        const id = JSON.parse(handoff.ledger().jobs[0].body).records[0].id;
+        return { job: "a".repeat(32), received_at: 100, items: [{
+          id, status: refreshes === 1 ? "already_member" : "added",
+          evidence: "SYNTHETIC local observation only", received_at: 50,
+          added_at: refreshes === 1 ? null : 75, verified_at: 200, updated: 200,
+        }] };
+      };
+      document.getElementById("app").replaceChildren(handoffScreen({ request }));
+    });
+    await page.getByText("Submission received: 1970-01-01 00:01:40 UTC", { exact: true }).waitFor();
+    await page.getByText("Date received (first record receipt): Unknown", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Refresh outcomes", exact: true }).click();
+    await page.getByText("Already member", { exact: true }).waitFor();
+    await page.getByText("Date added: Unknown", { exact: true }).waitFor();
+    await page.getByText("Last membership verification recorded: 1970-01-01 00:03:20 UTC", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Refresh outcomes", exact: true }).click();
+    await page.getByText("Date added: 1970-01-01 00:01:15 UTC", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Refresh outcomes", exact: true }).click();
+    await page.getByText(/Couldn't refresh; showing last known outcomes/).waitFor();
+    await page.getByText("Date added: 1970-01-01 00:01:15 UTC", { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() =>
+      [...document.querySelectorAll(".meeple-content *")].filter((el) =>
+        el.getBoundingClientRect().right > 390.5 ||
+        (el.tagName !== "INPUT" && el.scrollWidth > el.clientWidth + 1),
+      ).map((el) => el.tagName),
+    ), [], "timestamps must fit the mobile screen");
+    await page.getByText("Date added: 1970-01-01 00:01:15 UTC", { exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "/tmp/meeple-ledger-dates-mobile.png", fullPage: true });
     assert.deepEqual(errors, []);
     console.log(
       JSON.stringify({
@@ -166,11 +203,15 @@ const assert = require("node:assert/strict");
         ineligibleRecordsVisible: true,
         pendingRetryStillAccessible: true,
         originalsRetained: true,
+        separateReceiptAdditionVerificationDates: true,
+        alreadyMemberAdditionUnknown: true,
+        manualRefreshRetainsDatesOffline: true,
         pageErrors: errors,
         screenshots: [
           "/tmp/meeple-preview-mobile.png",
           "/tmp/meeple-unknown-mobile.png",
           "/tmp/meeple-ineligible-mobile.png",
+          "/tmp/meeple-ledger-dates-mobile.png",
         ],
       }),
     );

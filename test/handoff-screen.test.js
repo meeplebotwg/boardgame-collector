@@ -152,6 +152,112 @@ test("manual drain suppresses delegated signups and explains retained originals"
   assert.doesNotMatch(globalThis.document.body.textContent, /This batch · 0/);
 });
 
+test("receipt dates render separately with unknown legacy and non-success states, manual refresh and offline retention", async () => {
+  setup();
+  const { document } = globalThis;
+  const rows = await handoff.preview();
+  const job = "a".repeat(32);
+  handoff.prepare(origin, [rows[0]]);
+  await handoff.send(async () => ({ job, received_at: 100 }));
+  let response = {
+    job,
+    received_at: 100,
+    items: [
+      {
+        id: rows[0].id,
+        status: "already_member",
+        evidence: "Synthetic only",
+        received_at: 50,
+        added_at: null,
+        verified_at: 200,
+        updated: 200,
+      },
+    ],
+  };
+  let calls = 0;
+  const request = async () => {
+    calls++;
+    if (!response) throw Error("offline");
+    return response;
+  };
+  const open = async () => {
+    document
+      .getElementById("app")
+      .replaceChildren(ui.handoffScreen({ request }));
+    await tick();
+  };
+  await open();
+  assert.equal(
+    calls,
+    0,
+    "screen uses explicit manual refresh, not background polling",
+  );
+  assert.match(
+    document.body.textContent,
+    /Submission received: 1970-01-01 00:01:40 UTC/,
+  );
+  assert.match(
+    document.body.textContent,
+    /Date received \(first record receipt\): Unknown/,
+  );
+  btn("Refresh outcomes").click();
+  await tick();
+  assert.match(
+    document.body.textContent,
+    /Date received \(first record receipt\): 1970-01-01 00:00:50 UTC/,
+  );
+  assert.match(document.body.textContent, /Date added: Unknown/);
+  assert.match(
+    document.body.textContent,
+    /Last membership verification recorded: 1970-01-01 00:03:20 UTC/,
+  );
+  response.items[0] = { ...response.items[0], status: "added", added_at: 75 };
+  btn("Refresh outcomes").click();
+  await tick();
+  assert.match(
+    document.body.textContent,
+    /Date added: 1970-01-01 00:01:15 UTC/,
+  );
+  response = null;
+  btn("Refresh outcomes").click();
+  await tick();
+  assert.match(
+    document.body.textContent,
+    /last known outcomes, not new confirmation/,
+  );
+  assert.match(
+    document.body.textContent,
+    /Date added: 1970-01-01 00:01:15 UTC/,
+  );
+  await open();
+  assert.match(
+    document.body.textContent,
+    /Date added: 1970-01-01 00:01:15 UTC/,
+  );
+  const legacy = handoff.ledger();
+  delete legacy.jobs[0].received_at;
+  for (const status of [
+    "received",
+    "blocked",
+    "invitation_required",
+    "needs_verification",
+    "already_member",
+  ]) {
+    legacy.jobs[0].items = [
+      { id: rows[0].id, status, evidence: "Legacy synthetic" },
+    ];
+    localStorage.setItem("bgn.handoff.v1", JSON.stringify(legacy));
+    await open();
+    assert.match(document.body.textContent, /Submission received: Unknown/);
+    assert.match(document.body.textContent, /Date added: Unknown/);
+    assert.match(
+      document.body.textContent,
+      /Last membership verification recorded: Unknown/,
+    );
+    assert.doesNotMatch(document.body.textContent, /Invalid Date/);
+  }
+});
+
 function saveIneligibleContact() {
   saveContact({
     name: "Synthetic oversized contact",

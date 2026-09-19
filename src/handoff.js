@@ -111,6 +111,13 @@ export function ledger() {
 }
 const save = (value) => localStorage.setItem(KEY, JSON.stringify(value));
 
+function timestamp(value) {
+  if (value == null) return null; // Old receivers have no timestamp fields.
+  if (!Number.isSafeInteger(value) || value < 0 || value > 8640000000000)
+    throw Error("Invalid receiver timestamp.");
+  return value;
+}
+
 // Called synchronously by manual drain, including stale confirmation screens.
 export function delegatedEmails() {
   const state = ledger();
@@ -227,6 +234,7 @@ export async function send(request = nativeRequest) {
     const result = await request(pending.origin, "/v1/jobs", pending.body);
     if (!JOB.test(result?.job))
       throw Error("Invalid receipt; retry the same batch.");
+    const received_at = timestamp(result.received_at);
     const latest = ledger();
     if (
       latest.pending?.body !== pending.body ||
@@ -236,6 +244,7 @@ export async function send(request = nativeRequest) {
     latest.jobs.push({
       ...pending,
       job: result.job,
+      received_at,
       items: JSON.parse(pending.body).records.map((r) => ({
         id: r.id,
         status: r.kind === "signup" ? "received" : "stored_contact",
@@ -274,12 +283,28 @@ export async function poll(job, request = nativeRequest) {
       item.evidence.length > 2000
     )
       throw Error("Invalid item outcome.");
+    for (const key of ["received_at", "added_at", "verified_at", "updated"])
+      timestamp(item[key]);
   }
+  const received_at = timestamp(response.received_at);
   // Reload after await: concurrent new capture/send must not be rolled back by polling.
   const latest = ledger();
-  latest.jobs.find((e) => e.job === job).items = response.items.map(
-    ({ id, status, evidence }) => ({ id, status, evidence }),
-  );
+  const current = latest.jobs.find((e) => e.job === job);
+  current.received_at = received_at ?? current.received_at ?? null;
+  current.items = response.items.map((item) => {
+    const previous = current.items.find((r) => r.id === item.id);
+    return {
+      id: item.id,
+      status: item.status,
+      evidence: item.evidence,
+      ...Object.fromEntries(
+        ["received_at", "added_at", "verified_at", "updated"].map((key) => [
+          key,
+          item[key] ?? previous?.[key] ?? null,
+        ]),
+      ),
+    };
+  });
   save(latest);
   return response;
 }

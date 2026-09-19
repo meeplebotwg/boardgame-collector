@@ -112,10 +112,15 @@ test("synthetic lost ACK, receiver restart, gated processor and individual outco
     await boot();
     const job = await send(request);
     assert.equal(job, original.job);
+    assert.ok(Number.isInteger(original.received_at));
+    assert.equal(ledger().jobs[0].received_at, original.received_at);
     assert.equal(JSON.parse(cli("list")).length, 1);
     assert.equal(cli("run", job), "blocked");
     await poll(job, request);
     assert.equal(ledger().jobs[0].items[0].status, "blocked");
+    assert.equal(ledger().jobs[0].items[0].received_at, original.received_at);
+    assert.equal(ledger().jobs[0].items[0].added_at, null);
+    assert.equal(ledger().jobs[0].items[0].verified_at, null);
     const evidence = join(root, "evidence.txt");
     writeFileSync(
       evidence,
@@ -128,11 +133,35 @@ test("synthetic lost ACK, receiver restart, gated processor and individual outco
       "blocked",
     ];
     for (let i = 0; i < 4; i++)
-      cli("set", job, rows[i].id, statuses[i], "--evidence-file", evidence);
+      cli(
+        "set",
+        job,
+        rows[i].id,
+        statuses[i],
+        "--evidence-file",
+        evidence,
+        ...(i === 0 ? ["--added-at", "2020-01-02T03:04:05Z"] : []),
+      );
     const result = await poll(job, request);
     assert.deepEqual(
       result.items.map((i) => i.status),
       [...statuses, "stored_contact"],
+    );
+    const persisted = ledger().jobs[0];
+    assert.equal(persisted.received_at, original.received_at);
+    assert.equal(persisted.items[0].added_at, 1577934245);
+    assert.ok(persisted.items[0].verified_at > persisted.items[0].added_at);
+    assert.equal(
+      persisted.items[1].added_at,
+      null,
+      "already_member does not invent an original add date",
+    );
+    assert.ok(Number.isInteger(persisted.items[1].verified_at));
+    assert.equal(persisted.items[2].verified_at, null);
+    assert.equal(
+      persisted.items[4].added_at,
+      null,
+      "contacts are never enrolled",
     );
     assert.equal(pendingAddresses().length, 4);
     assert.equal(JSON.parse(localStorage.getItem("bgn.contacts.v1")).length, 1);

@@ -216,6 +216,95 @@ test("malformed acknowledgement and persistence failure keep original retry batc
   assert.equal(m.ledger().pending.body, before);
 });
 
+test("timestamps survive receipt and polling without inferring legacy addition or verification", async () => {
+  setup();
+  const rows = await m.preview();
+  m.prepare(ORIGIN, [rows[0]]);
+  await m.send(async () => ({ job: receipt, received_at: 100 }));
+  assert.equal(m.ledger().jobs[0].received_at, 100);
+  const response = {
+    job: receipt,
+    received_at: 100,
+    items: [
+      {
+        id: rows[0].id,
+        status: "added",
+        evidence: "Synthetic only",
+        received_at: 50,
+        added_at: 75,
+        verified_at: 200,
+        updated: 200,
+      },
+    ],
+  };
+  await m.poll(receipt, async () => response);
+  assert.deepEqual(m.ledger().jobs[0].items, response.items);
+  const before = localStorage.getItem("bgn.handoff.v1");
+  for (const value of [-1, 1.5, "200", true, 8640000000001]) {
+    await assert.rejects(
+      m.poll(receipt, async () => ({
+        ...response,
+        items: [{ ...response.items[0], added_at: value }],
+      })),
+      /timestamp/i,
+    );
+    assert.equal(localStorage.getItem("bgn.handoff.v1"), before);
+  }
+  await assert.rejects(
+    m.poll(receipt, async () => ({ ...response, received_at: "100" })),
+    /timestamp/i,
+  );
+  // A legacy receiver's updated is not an addition or membership verification date.
+  await m.poll(receipt, async () => ({
+    job: receipt,
+    items: [
+      {
+        id: rows[0].id,
+        status: "already_member",
+        evidence: "Legacy synthetic",
+        updated: 300,
+      },
+    ],
+  }));
+  const item = m.ledger().jobs[0].items[0];
+  assert.equal(
+    item.added_at,
+    75,
+    "legacy response must not erase known history",
+  );
+  assert.equal(item.verified_at, 200);
+  assert.equal(item.received_at, 50);
+  assert.equal(item.updated, 300);
+  setup();
+  m.prepare(ORIGIN, [rows[0]]);
+  await m.send(async () => ({ job: receipt }));
+  await m.poll(receipt, async () => ({
+    job: receipt,
+    items: [
+      {
+        id: rows[0].id,
+        status: "already_member",
+        evidence: "Legacy",
+        updated: 300,
+      },
+    ],
+  }));
+  assert.equal(m.ledger().jobs[0].items[0].added_at, null);
+  assert.equal(m.ledger().jobs[0].items[0].verified_at, null);
+  assert.equal(m.ledger().jobs[0].received_at, null);
+});
+
+test("invalid receipt timestamp preserves immutable retry batch", async () => {
+  setup();
+  m.prepare(ORIGIN, await m.preview());
+  await assert.rejects(
+    m.send(async () => ({ job: receipt, received_at: "not-a-date" })),
+    /timestamp/i,
+  );
+  assert.ok(m.ledger().pending);
+  assert.equal(m.ledger().jobs.length, 0);
+});
+
 test("normal browser has no production sending capability", async () => {
   setup();
   globalThis.window = {};

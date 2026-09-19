@@ -20,6 +20,15 @@ const labels = {
   needs_verification: "Needs verification — do not retry Google blindly",
 };
 
+function dateLabel(value) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 8640000000000)
+    return "Unknown";
+  return new Date(value * 1000)
+    .toISOString()
+    .replace("T", " ")
+    .replace(".000Z", " UTC");
+}
+
 export function handoffScreen({
   request = nativeRequest,
   approve = approveOrigin,
@@ -183,6 +192,7 @@ export function handoffScreen({
           { class: "card" },
           h("strong", {}, "Receipt · " + job.job),
           h("div", {}, job.origin),
+          h("div", {}, `Submission received: ${dateLabel(job.received_at)}`),
           ...job.items.map((item) => {
             const r = JSON.parse(job.body).records.find(
               (r) => r.id === item.id,
@@ -193,6 +203,23 @@ export function handoffScreen({
               h("strong", {}, r.name || r.email),
               h("div", {}, r.email || r.phone || ""),
               h("div", {}, labels[item.status]),
+              h(
+                "div",
+                {},
+                `Date received (first record receipt): ${dateLabel(item.received_at)}`,
+              ),
+              r.kind === "signup"
+                ? h(
+                    "div",
+                    {},
+                    h("div", {}, `Date added: ${dateLabel(item.added_at)}`),
+                    h(
+                      "div",
+                      {},
+                      `Last membership verification recorded: ${dateLabel(item.verified_at)}`,
+                    ),
+                  )
+                : null,
               item.evidence ? h("div", {}, item.evidence) : null,
             );
           }),
@@ -229,6 +256,11 @@ export function handoffScreen({
             "p",
             {},
             "Received means safely stored, NOT added to Google Groups. Owner login and computer-use access are required for processing.",
+          ),
+          h(
+            "p",
+            {},
+            "Dates are UTC receiver records. Unknown means no date was recorded. Use Refresh outcomes for updates (no push notifications). Membership observations are historical, not proof of current subscription.",
           ),
           h(
             "p",
