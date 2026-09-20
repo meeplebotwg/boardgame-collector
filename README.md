@@ -181,6 +181,8 @@ there is no arbitrary CORS or public result-mutation/agent-prompt endpoint.
 The native command independently pins the explicitly approved exact origin in app
 config, allows only bounded intake/status requests, verifies TLS and follows no
 redirects. Existing general HTTP plugin capabilities are not widened to `.ts.net`.
+Since v0.3.2, the installed app accepts runtime-approved HTTPS `*.ts.net` origins;
+receiver activation does not require v0.3.6. The new date display does.
 No secrets or production hostnames are bundled. A user may reapprove an old exact
 endpoint to read its historical receipts; it cannot reroute a pending batch.
 
@@ -193,9 +195,10 @@ these gates are satisfied. No model/provider/profile grants are changed here.
 
 ## Packaging and design
 
-Version `0.3.4` is prepared in this PR, not released; see
-[release notes](docs/releases/v0.3.4.md). Merging this version bump triggers the
-existing signed-release workflow, so merge/release remains an owner gate.
+Latest published release checked for this PR: **v0.3.5**. Version **0.3.6**
+is prepared, not released; see [release notes](docs/releases/v0.3.6.md). Merging
+this version bump triggers the existing signed-release workflow, so merge/release
+remains an owner gate.
 Release pipeline, package identity and
 signer continuity remain in [ADR 0006](docs/adr/0006-release-pipeline.md) and
 [ADR 0007](docs/adr/0007-in-app-self-updater.md). Never install a debug-signed APK

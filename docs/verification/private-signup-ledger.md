@@ -51,9 +51,22 @@ change, not a deployed service or APK release.
 - Optional browser harness passed with existing external Playwright installation
   and cached Chromium; no runtime/project dependency or grants were added. Its
   Vite process and isolated browser were stopped after verification.
-- Rust/native sources, permissions, config and version are unchanged. Local
-  Rust/Android builds and physical phone tests were not repeated for this slice;
-  upstream PR CI remains a separate result, not implied by these local gates.
+- Release-preparation follow-up: upstream main and latest release both checked
+  at v0.3.5; bumped package/lockfile and Tauri config to **0.3.6** (ADR 0006).
+  Frontend **186**, receiver **16**, release-gate **8** tests passed again, as did
+  lint, format, build and the 390px Chromium smoke (zero page errors/overflow).
+- Native host gates passed on Rust/Cargo **1.96.0**, with desktop dependencies
+  present: `cargo fmt --check`, `CARGO_BUILD_JOBS=2 cargo clippy --all-targets
+  -- -D warnings`, `CARGO_BUILD_JOBS=2 cargo test --lib` (**4 passed**), and
+  `CARGO_BUILD_JOBS=2 cargo check`. No native source/permission change. This is
+  Linux host compilation, not an Android APK or physical phone test.
+- Separate private deployment artifacts were staged outside the repo: pinned
+  receiver source, 0600 config, restart/UMask-0077 user unit and review/runbook.
+  The staged source passed isolated temporary SQLite/HTTP replay, receipt dates,
+  restart, auth-negative/owner-isolation, contact exclusion, blocked-no-action
+  default CLI, 0600 export/history/backup and pre-migration backup checks. Unit
+  syntax passed; no unit installed/started, no production DB opened, and Serve
+  remained unchanged. Direct loopback tests are not new live Serve auth proof.
 
 ## Remaining live gate / operational cautions
 
@@ -64,7 +77,9 @@ Members page, and reports no native browser window. There is no implemented
 hybrid browser worker. Processing remains the existing explicitly human-gated
 Hermes path until an authorized owner UI can be observed and separately tested.
 No invites, Google changes, cron, new secrets, runtime grants, Serve mappings,
-production activation, version bump, APK, merge, deploy or release occurred.
+production activation, APK, merge, deploy or release occurred. Version **0.3.6**
+is prepared for owner review, not released; no live Google add is proven.
+The deployment staging source/config is private and separate from this repo.
 
 This ledger is not a full/current membership roster or a safe broadcast source;
 dedupe is historical work dedupe, never permission to re-add an unsubscribe.

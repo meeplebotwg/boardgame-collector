@@ -14,7 +14,9 @@ This is historical work dedupe, not proof of current subscription; never use it
 to automatically re-add someone who may have unsubscribed.
 
 Contacts remain private contacts, never enrolled. No automatic invitations,
-Google adapter, selectors, credentials, grants, cron, deployment or APK bump.
+Google adapter, selectors, credentials, grants, cron or deployment. A follow-up
+release-preparation bump to v0.3.6 is included for owner review (ADR 0006);
+prepared is not released and does not prove live Google membership changes.
 Actual processing remains the existing human-gated Hermes path. The desired
 hybrid scripted browser worker + Meeple exceptions is a remaining live-UI gate:
 the automation browser currently reaches Google Sign in, not an authenticated
