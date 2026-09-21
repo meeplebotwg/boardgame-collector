@@ -48,6 +48,45 @@ function setup() {
   localStorage.setItem("bgn.meeple.origin.v1", origin);
   return window;
 }
+test("worker invitation evidence distinguishes pending, unsent and legacy unknown", async () => {
+  setup();
+  const { document } = globalThis;
+  const [row] = await handoff.preview();
+  const job = "e".repeat(32);
+  handoff.prepare(origin, [row]);
+  await handoff.send(async () => ({ job }));
+  for (const [evidence, label] of [
+    [
+      JSON.stringify({ worker: 1, meaning: "invitation_pending_verified" }),
+      "Invitation pending — membership not verified",
+    ],
+    [
+      JSON.stringify({ worker: 1, meaning: "invitation_not_sent" }),
+      "Invitation required — not sent",
+    ],
+    ["Legacy observation", "Invitation required — sending not confirmed"],
+    ["{broken", "Invitation required — sending not confirmed"],
+    ["null", "Invitation required — sending not confirmed"],
+    [
+      JSON.stringify({ worker: 2, meaning: "invitation_pending_verified" }),
+      "Invitation required — sending not confirmed",
+    ],
+  ]) {
+    await handoff.poll(job, async () => ({
+      job,
+      items: [{ id: row.id, status: "invitation_required", evidence }],
+    }));
+    document.getElementById("app").replaceChildren(ui.handoffScreen());
+    await tick();
+    assert.ok(document.body.textContent.includes(label), label);
+    assert.match(document.body.textContent, /Date added: Unknown/);
+    assert.match(
+      document.body.textContent,
+      /Last membership verification recorded: Unknown/,
+    );
+  }
+});
+
 test("Home offers specific preview not generic agent task", async () => {
   setup();
   globalThis.__APP_VERSION__ = "0.0.0-test";

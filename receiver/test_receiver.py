@@ -129,17 +129,24 @@ class ReceiverTests(unittest.TestCase):
         self.assertIn('no action attempted', job['items'][0]['evidence'])
         self.assertEqual(job['items'][1]['status'], 'stored_contact')
 
+    def worker_config(self):
+        path = self.root / 'ui.json'
+        path.write_text(json.dumps({'display': ':193', 'xauthority': str(self.root / 'authority'),
+            'vnc_server': '127.0.0.1::15991', 'vncdo': '/nonexistent/vncdo', 'ffmpeg': '/nonexistent/ffmpeg',
+            'width': 1000, 'height': 780, 'lock': str(self.root / 'native.lock')}))
+        return path
+
     def test_worker_view_dedupes_email_and_skips_completed_or_invite(self):
         b = batch()
         duplicate = dict(b['records'][0], id='3' * 64, email='new@example.org')
         b['records'].append(duplicate)
         _, receipt = self.request(data=b)
         def runner(*args, **kwargs):
-            view = json.loads((self.root / 'jobs' / (receipt['job'] + '.json')).read_text())
-            self.assertEqual(len(view['items']), 1)
+            view = json.loads(Path(json.loads(kwargs['input'].splitlines()[0])['request']).read_text())
+            self.assertEqual(view['item']['email'], 'new@example.org')
             class Result: returncode = 0
             return Result()
-        m.run_job(self.store, receipt['job'], True, runner=runner)
+        m.run_job(self.store, receipt['job'], True, runner=runner, mode='reconcile', ui_config=self.worker_config())
         self.store.set_outcome(receipt['job'], '1' * 64, 'invitation_required', 'Synthetic test only')
         def no_call(*args, **kwargs):
             self.fail('Must not repeat invitation or start empty processor')
@@ -149,8 +156,7 @@ class ReceiverTests(unittest.TestCase):
         _, receipt = self.request()
         def interrupted(*args, **kwargs):
             raise TimeoutError('synthetic interruption')
-        with self.assertRaises(TimeoutError):
-            m.run_job(self.store, receipt['job'], True, runner=interrupted)
+        self.assertEqual(m.run_job(self.store, receipt['job'], True, runner=interrupted, mode='reconcile', ui_config=self.worker_config()), 'needs_verification')
         self.assertEqual(self.store.read(receipt['job'])['items'][0]['status'], 'needs_verification')
         m.run_job(self.store, receipt['job'])
         self.assertEqual(self.store.read(receipt['job'])['items'][0]['status'], 'needs_verification')
@@ -163,9 +169,9 @@ class ReceiverTests(unittest.TestCase):
             self.assertNotIn('$(touch', ' '.join(args))
             self.assertEqual(args[:6], ['hermes', '--profile', 'meeple', 'chat', '--query-file', '-'])
             self.assertIn('First inspect membership', kwargs['input'])
-            view = json.loads((self.root / 'jobs' / (receipt['job'] + '.json')).read_text())
-            self.assertEqual(len(view['items']), 1)
-            self.assertEqual(set(view['items'][0]), {'id', 'email', 'status'})
+            view = json.loads(Path(json.loads(kwargs['input'].splitlines()[0])['request']).read_text())
+            self.assertEqual(view['item']['email'], 'new@example.org')
+            self.assertEqual(set(view['item']), {'id', 'email', 'status'})
             self.assertFalse(kwargs.get('shell', False))
             self.assertIn('pass_fds', kwargs, 'processor must retain lock if launcher dies')
             import os
@@ -174,9 +180,9 @@ class ReceiverTests(unittest.TestCase):
                 m.run_job(self.store, receipt['job'], True, runner=runner)
             class Result: returncode = 0
             return Result()
-        self.assertEqual(m.run_job(self.store, receipt['job'], True, runner=runner), 'invoked')
+        self.assertEqual(m.run_job(self.store, receipt['job'], True, runner=runner, mode='reconcile', ui_config=self.worker_config()), 'needs_verification')
         self.assertEqual(len(calls), 1)
-        self.assertTrue((self.root / 'jobs' / (receipt['job'] + '.json')).is_file())
+        self.assertEqual(len(list((self.root / 'jobs' / receipt['job']).glob('*/request.json'))), 1)
         with self.assertRaises(ValueError):
             m.run_job(self.store, '../../escape', True, runner=runner)
 

@@ -17,11 +17,12 @@ Contacts remain private contacts, never enrolled. No automatic invitations,
 Google adapter, selectors, credentials, grants, cron or deployment. A follow-up
 release-preparation bump to v0.3.6 is included for owner review (ADR 0006);
 prepared is not released and does not prove live Google membership changes.
-Actual processing remains the existing human-gated Hermes path. The desired
-hybrid scripted browser worker + Meeple exceptions is a remaining live-UI gate:
-the automation browser currently reaches Google Sign in, not an authenticated
-owner Members page, and no native browser window is available. Observe the real
-authorized UI before implementing or verifying any Groups automation.
+The original missing-session blocker is superseded: owner orchestration has
+observed the authenticated dedicated native Groups UI without submitting changes.
+The [human-gated enrollment worker](../enrollment-worker.md) adds native tooling,
+explicit account/mode policy and validated result persistence to this same ledger.
+Its synthetic tests do not prove Google interaction: native nonmutating rehearsal
+and a separately authorized recipient-specific mutation remain operational gates.
 
 ## Timestamp contract (UTC Unix seconds; null means unknown)
 

@@ -52,7 +52,7 @@ stored as private contacts, never enrolled. Receiving a duplicate pending signup
 does not mean it is already a Google member. Outcomes require a local operator's
 observational evidence; no Google membership API is implemented or simulated as
 live. The default local processing command honestly marks the login gate blocked.
-Actual processing needs an owner Google session and working computer-use access.
+Actual processing needs an owner Google session and explicit dedicated native-UI configuration.
 No cron/unattended worker or global Hermes webhook is enabled.
 
 Receipt history shows **submission received**, **first record received**, **date
@@ -65,9 +65,13 @@ Google check. The ledger is historical reconciliation evidence, **not a complete
 or current membership roster, a broadcast send-list, or authority to re-add an
 unsubscribed address**. See [ADR 0012](docs/adr/0012-private-signup-ledger.md).
 
-The hybrid scripted Groups worker plus Meeple exceptions remains gated on an
-observed, authenticated owner UI. It is not implemented here: actual processing
-still uses the existing human-gated Hermes path, not a guessed browser adapter.
+The [hybrid enrollment worker](docs/enrollment-worker.md) processes one signup per
+explicit local run, using bounded native UI tools and validated per-record results.
+Non-Google accounts require invitations; unknown account eligibility never permits
+direct-add. Gmail/custom-domain spelling is not account evidence. The app distinguishes
+**Invitation pending — membership not verified**, **Invitation required — not sent**,
+and legacy **sending not confirmed**. No invitation is an Added outcome.
+Implementation is locally tested, not deployed or real-Google verified.
 
 All originals stay on the phone. Delegated signup addresses are excluded from
 manual drain (including after receipt/outcome) to prevent manual/agent races.
@@ -186,12 +190,14 @@ receiver activation does not require v0.3.6. The new date display does.
 No secrets or production hostnames are bundled. A user may reapprove an old exact
 endpoint to read its historical receipts; it cannot reroute a pending batch.
 
-After the owner logs in and computer-use access works, `run "$JOB"
---owner-session-ready` explicitly starts one bounded `hermes --profile meeple chat`
-with fixed instructions via stdin. One filesystem lock covers the subprocess;
-all pending items first become needs-verification. The flag is an operator
-assertion, **not** an automated login check. Do not invoke against real data until
-these gates are satisfied. No model/provider/profile grants are changed here.
+After owner login, review [the enrollment runbook](docs/enrollment-worker.md).
+A ready run requires `--owner-session-ready --mode reconcile|invite|direct_add
+--ui-config "$PRIVATE_UI_CONFIG"`; use `--item "$ITEM"` to pin the signup.
+Readiness is an operator assertion, **not** an automated login check. Each run
+holds Store and native UI locks and persists uncertainty before external action.
+Ambiguous previous attempts reconcile read-only; they never automatically resend.
+No real-data run is authorized by this implementation. No model/provider/profile
+grants are changed here.
 
 ## Packaging and design
 

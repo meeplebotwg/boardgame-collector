@@ -4,7 +4,7 @@ Status: implementation proposed for review; production activation gated.
 
 Extended by [ADR 0012](0012-private-signup-ledger.md): nullable receipt/addition/
 verification timestamps and private reconciliation export in the same SQLite
-store. This does not implement the live-UI-gated hybrid Groups worker.
+store. The human-gated hybrid worker is specified in [Enrollment worker](../enrollment-worker.md); implementation and synthetic evidence are not live activation.
 
 ## Outcome and non-goals
 
@@ -72,19 +72,35 @@ no logs containing request bodies/PII. Host filesystem is a trusted boundary.
 ## Local processing and gates
 
 CLI list/read/set exposes private records locally; outcome requires nonempty
-human evidence. Fixed-scope `run JOB` uses a filesystem processor lock; without
-explicit `--owner-session-ready` it records blocked with login-gate evidence and
-never invokes Hermes. With that operator assertion, `hermes --profile meeple
-chat --query-file - --max-turns 40 --run-budget 600` receives fixed instructions
-via stdin referring only to validated job ID and a private fixed-basename JSON
-job file, never shell-interpolated record text. The view contains only signup
-IDs, normalized email, fixed group/action and statuses; no contact notes or
-free-form source/name. It dedupes email and skips verified/ invitation-required
-items. Invocation first durably sets needs_verification so an interruption
-cannot quietly become an automatic retry.
-Hold lock for the subprocess; no background daemon/cron in this slice. Restart
-after an ambiguous Google action requires inspecting membership before retrying.
-CLI evidence is operator-attested, not independent Google verification.
+human evidence. `run JOB` without `--owner-session-ready` records a login-gate
+block and never invokes Hermes. A ready run additionally requires explicit
+`--mode direct_add|invite|reconcile` and private `--ui-config`. Each invocation
+handles one unique signup target; `--item` selects an exact record. The logical
+ledger group key remains `bgn-wg` for compatibility, but the only UI destination
+is `https://groups.google.com/g/boardgamenightwg/members`.
+
+The child uses the meeple profile, fixed instructions via stdin, 40 turns/600
+seconds, terminal/vision tools and no project/memory rule injection. A fresh
+private attempt contains only signup ID/email/status, operator mode/eligibility,
+and native transport configuration; no notes, names, sources or contacts. The
+parent marks needs_verification before invocation, holds Store and shared native
+UI locks, then validates the closed response and screenshot journal before
+writing the existing ledger. Worker stdout/exit zero alone cannot imply success.
+Manual CLI set takes the Store lock too. No background daemon/cron.
+
+Non-Google accounts require invitation. Unknown eligibility never permits direct
+add; `--eligibility google` is an owner assertion from known account/UI evidence,
+never inferred from gmail.com or a custom domain. Only explicit invite mode may
+send invitations; Google direct-add fallback additionally requires the explicit
+`--allow-invitation-fallback` flag. Invite-required without a verified pending
+invitation means sending is not confirmed, never Added. Both membership and
+pending invitations must be inspected before action and reread afterward.
+
+Uncertain attempts are forced into read-only reconciliation even when requested
+with a mutating mode. Empty lists after ambiguity do not authorize resending.
+Known members/pending invitations are not replayed; explicit reconcile can check
+later membership. Native observations are agent-attested, not independent Google
+proof. See the worker spec for trust limits, result semantics and operator gates.
 
 Tests use only synthetic example.org records, real temporary SQLite/HTTP, and
 injected native transport seams. Browser demo cannot prove Android VPN/TLS.
@@ -102,10 +118,11 @@ owner login and actual Google outcome remain separately gated.
    real Serve strips spoofed identity; test synthetic records first.
 3. Build signed update with original signer. Verify native command/HTTPS from
    phone with Tailscale on; off gives unknown/retry while offline capture works.
-4. Owner signs in to Groups with computer-use reachable. Read synthetic job,
-   exercise default auth-blocked run. Only then explicitly invoke one real job
-   with `--owner-session-ready`, verify membership before action and record
-   evidence for added/already_member/invitation_required/blocked. Never enroll
+4. Owner signs in to the dedicated native Groups session. Exercise the default
+   blocked run against isolated synthetic intake. Follow the enrollment worker
+   runbook for separately authorized read-only rehearsal, then an exact-recipient
+   run with explicit readiness, native config, mode and account eligibility.
+   Verify both member/invitation lists before and after action. Never enroll
    contacts or act on notes. No unattended worker until separate approval.
 
 Retention: phone outbox/history and host DB are not pruned automatically. Owner

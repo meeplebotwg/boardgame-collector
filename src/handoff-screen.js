@@ -15,10 +15,27 @@ const labels = {
   stored_contact: "Stored private contact — not a mailing signup",
   added: "Added",
   already_member: "Already member",
-  invitation_required: "Invitation required — not added",
+  invitation_required: "Invitation required — sending not confirmed",
   blocked: "Blocked",
   needs_verification: "Needs verification — do not retry Google blindly",
 };
+
+function outcomeLabel(item) {
+  if (item.status === "invitation_required") {
+    try {
+      const evidence = JSON.parse(item.evidence);
+      if (evidence?.worker === 1) {
+        if (evidence.meaning === "invitation_pending_verified")
+          return "Invitation pending — membership not verified";
+        if (evidence.meaning === "invitation_not_sent")
+          return "Invitation required — not sent";
+      }
+    } catch {
+      // Legacy/manual evidence does not prove an invitation was sent.
+    }
+  }
+  return labels[item.status];
+}
 
 function dateLabel(value) {
   if (!Number.isSafeInteger(value) || value < 0 || value > 8640000000000)
@@ -202,7 +219,7 @@ export function handoffScreen({
               { class: "stack" },
               h("strong", {}, r.name || r.email),
               h("div", {}, r.email || r.phone || ""),
-              h("div", {}, labels[item.status]),
+              h("div", {}, outcomeLabel(item)),
               h(
                 "div",
                 {},

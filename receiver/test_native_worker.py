@@ -1,0 +1,146 @@
+"""Native helper safety at real subprocess seams, with synthetic executable transports."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+import enrollment_worker as w
+import meeple_receiver as m
+import test_enrollment as fixtures
+import test_receiver
+
+
+class NativeWorkerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.config = fixtures.EnrollmentTests.worker(self)
+        self.work = {'version': 1, 'job': 'a' * 32, 'attempt': 'b' * 32,
+                     'group_url': w.GROUP_URL, 'mode': 'direct_add', 'eligibility': 'google',
+                     'allow_fallback': False, 'deadline': int(time.time()) + 100,
+                     'item': {'id': '1' * 64, 'email': 'synthetic@example.org', 'status': 'received'},
+                     'ui': w.ui_config(self.config)}
+        self.path = self.root / 'request.json'
+        self.save()
+        w.save_json(self.root / 'active.json', {'attempt': self.work['attempt']})
+
+    def save(self):
+        self.path.write_text(json.dumps(self.work))
+
+    def cli(self, *args):
+        return subprocess.run([sys.executable, str(Path(w.__file__)), '--request', str(self.path), *args],
+                              text=True, capture_output=True, timeout=20)
+
+    def observe(self):
+        ui = w.NativeUI(self.path)
+        observation = {'membership': 'absent', 'invitation': 'absent',
+                       'member_capture': ui.capture(), 'invite_capture': ui.capture()}
+        ui.observe('before', observation)
+        return ui
+
+    def test_escape_uses_real_vnc_keyname_and_no_arbitrary_text_or_url(self):
+        self.assertEqual(self.cli('key', 'Escape').returncode, 0)
+        self.assertIn("'esc'", (self.root / 'commands').read_text())
+        previous = (self.root / 'commands').read_text()
+        for args in [('type', 'injected'), ('open-members', 'https://evil.example.org'),
+                     ('key', 'Return'), ('email', 'other@example.org'), ('click', '-1', '400')]:
+            self.assertNotEqual(self.cli(*args).returncode, 0)
+        self.assertEqual((self.root / 'commands').read_text(), previous)
+
+    def test_submission_requires_both_absent_correct_checkbox_and_eligibility(self):
+        ui = self.observe()
+        commands = (self.root / 'commands').read_text()
+        for mode, eligibility, direct, fallback in [
+            ('reconcile', 'google', 'yes', 'no'), ('direct_add', 'non_google', 'yes', 'no'),
+            ('direct_add', 'unknown', 'yes', 'no'), ('direct_add', 'google', 'no', 'no'),
+            ('direct_add', 'google', 'yes', 'yes'), ('invite', 'non_google', 'yes', 'no')]:
+            self.work.update(mode=mode, eligibility=eligibility); self.save()
+            with self.assertRaises(ValueError):
+                w.NativeUI(self.path).submit(5, 5, direct, fallback)
+        self.assertEqual((self.root / 'commands').read_text(), commands)
+        self.work.update(mode='invite', eligibility='non_google'); self.save()
+        ui = w.NativeUI(self.path)
+        ui.submit(5, 5, 'no', 'no')
+        commands = (self.root / 'commands').read_text()
+        with self.assertRaises(FileExistsError):
+            ui.submit(5, 5, 'no', 'no')
+        self.assertEqual((self.root / 'commands').read_text(), commands)
+
+    def test_pending_invitation_and_member_precheck_prohibit_submit(self):
+        ui = self.observe()
+        path = self.root / 'before.json'
+        before = w.load_json(path)
+        commands = (self.root / 'commands').read_text()
+        for member, invitation in [('present', 'absent'), ('absent', 'present'), ('unknown', 'absent'), ('absent', 'unknown')]:
+            path.write_text(json.dumps(dict(before, membership=member, invitation=invitation)))
+            with self.assertRaises(ValueError):
+                ui.submit(5, 5, 'yes', 'no')
+        self.assertEqual((self.root / 'commands').read_text(), commands)
+
+    def test_expired_finished_or_inactive_attempt_cannot_touch_ui(self):
+        self.work['deadline'] = int(time.time()) - 1; self.save()
+        self.assertNotEqual(self.cli('open-members').returncode, 0)
+        self.work['deadline'] = int(time.time()) + 100; self.save()
+        self.assertEqual(self.cli('finish', '--stop', 'login').returncode, 0)
+        self.assertNotEqual(self.cli('open-members').returncode, 0)
+        (self.root / 'response.json').unlink(); (self.root / 'active.json').unlink()
+        self.assertNotEqual(self.cli('open-members').returncode, 0)
+        self.assertFalse((self.root / 'commands').exists())
+
+    def test_config_rejects_nonlocal_remote_and_unknown_fields(self):
+        original = w.load_json(self.config)
+        for changes in ({'display': 'remote:0'}, {'vnc_server': '192.0.2.1::5900'}, {'width': True}, {'url': 'anything'}, {'vncdo': 'relative'}):
+            self.config.write_text(json.dumps(dict(original, **changes)))
+            with self.assertRaises(ValueError): w.ui_config(self.config)
+
+    def test_shared_native_lock_serializes_distinct_stores_and_cli_set(self):
+        a, b = m.Store(self.root / 'a'), m.Store(self.root / 'b')
+        job_a = a.intake(test_receiver.OWNER, test_receiver.batch())[0]
+        job_b = b.intake(test_receiver.OWNER, test_receiver.batch())[0]
+        evidence = self.root / 'manual.txt'; evidence.write_text('Synthetic operator only')
+        calls = []
+        def running(args, **kwargs):
+            calls.append(args)
+            for store, job in [(a, job_a), (b, job_b)]:
+                with self.assertRaises(BlockingIOError):
+                    m.run_job(store, job, True, mode='reconcile', ui_config=self.config)
+            result = subprocess.run([sys.executable, str(Path(m.__file__)), '--data', str(a.root), 'set',
+                                     job_a, '1' * 64, 'added', '--evidence-file', str(evidence)], capture_output=True)
+            self.assertNotEqual(result.returncode, 0, 'manual set must not race a live worker')
+            return subprocess.CompletedProcess(args, 0)
+        self.assertEqual(m.run_job(a, job_a, True, mode='reconcile', ui_config=self.config, runner=running), 'needs_verification')
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(a.read(job_a)['items'][0]['status'], 'needs_verification')
+        self.assertEqual(b.read(job_b)['items'][0]['status'], 'received')
+
+    def test_real_child_timeout_kills_descendants_and_releases_inherited_lock(self):
+        # A descendant intentionally inherits the advisory lock. Its survival would
+        # block the nonblocking reacquisition below. No browser process is started.
+        lockpath = self.root / 'timeout.lock'
+        marker = self.root / 'spawned'
+        with w.locked(lockpath) as lock:
+            script = ('import subprocess,sys,time,pathlib; '
+                      'subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],pass_fds=(' + str(lock.fileno()) + ',)); '
+                      'pathlib.Path(' + repr(str(marker)) + ').touch(); time.sleep(30)')
+            with self.assertRaises(subprocess.TimeoutExpired):
+                w.invoke([sys.executable, '-c', script], input='', text=True, pass_fds=(lock.fileno(),),
+                         timeout=1, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertTrue(marker.exists(), 'the descendant really started')
+        # Kernel scheduling of group death is asynchronous; bounded wait, not blind retry of work.
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                with w.locked(lockpath): pass
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline: raise
+                time.sleep(.01)
+
+
+if __name__ == '__main__':
+    unittest.main()
