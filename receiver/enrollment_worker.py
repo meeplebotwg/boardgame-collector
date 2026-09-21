@@ -238,7 +238,7 @@ class NativeUI:
             pass
         subprocess.run([self.conf['ffmpeg'], '-nostdin', '-loglevel', 'error', '-y', '-f', 'x11grab',
                         '-video_size', f"{self.conf['width']}x{self.conf['height']}", '-i', self.conf['display'],
-                        '-frames:v1', '1', '-update', '1', str(path)],
+                        '-frames:v', '1', '-update', '1', str(path)],
                        env=self.env, timeout=15, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         capture_ok(self.directory, name)
         save_json(self.directory / (name + '.json'), {'attempt': self.work['attempt'],

@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+import struct
 import sys
 import tempfile
 import time
@@ -12,6 +14,10 @@ import enrollment_worker as w
 import meeple_receiver as m
 import test_enrollment as fixtures
 import test_receiver
+
+
+# Resolve before fixture setup prepends its fake executables to PATH.
+REAL_FFMPEG = shutil.which('ffmpeg')
 
 
 class NativeWorkerTests(unittest.TestCase):
@@ -42,6 +48,37 @@ class NativeWorkerTests(unittest.TestCase):
                        'member_capture': ui.capture(), 'invite_capture': ui.capture()}
         ui.observe('before', observation)
         return ui
+
+    @unittest.skipUnless(REAL_FFMPEG, 'real ffmpeg is required for capture integration')
+    def test_capture_encodes_real_png_with_generated_output_options(self):
+        assert REAL_FFMPEG is not None
+        # Replace only the screen input with lavfi. The actual helper subprocess,
+        # ffmpeg option parser, encoder, output file and provenance stay real.
+        # No X server (especially the live browser display) is contacted.
+        adapter = self.root / 'lavfi-ffmpeg'
+        adapter.write_text('#!' + sys.executable + '\n' +
+            'import os,sys\n' +
+            'args = sys.argv[1:]\n' +
+            'args[args.index("-f"):args.index("-i") + 2] = '
+            '["-f", "lavfi", "-i", "color=c=black:size=16x16:rate=1"]\n' +
+            'os.execv(' + repr(REAL_FFMPEG) + ', [' + repr(REAL_FFMPEG) + '] + args)\n')
+        adapter.chmod(0o700)
+        self.work['ui']['ffmpeg'] = str(adapter)
+        self.save()
+        result = self.cli('capture')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        name = result.stdout.strip()
+        image = self.root / name
+        png = image.read_bytes()
+        self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+        self.assertEqual(struct.unpack('>II', png[16:24]), (16, 16))
+        decoded = subprocess.run([REAL_FFMPEG, '-v', 'error', '-i', str(image),
+                                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                                 capture_output=True, check=True, timeout=15)
+        self.assertEqual(decoded.stdout, bytes(16 * 16 * 3))
+        self.assertEqual(image.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(w.load_json(self.root / (name + '.json')),
+                         {'attempt': self.work['attempt'], 'stage': 'before'})
 
     def test_escape_uses_real_vnc_keyname_and_no_arbitrary_text_or_url(self):
         self.assertEqual(self.cli('key', 'Escape').returncode, 0)
