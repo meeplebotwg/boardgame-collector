@@ -91,8 +91,8 @@ Every Store targeting this browser MUST use the **same UI config and lock path**
 Locks are advisory between cooperative workers, not protection against a human
 simultaneously using VNC. Coordinate exclusive browser ownership with the owner;
 no simultaneous remote interaction. Keep the immutable release containing all
-three receiver files (`meeple_receiver.py`, `enrollment_worker.py`,
-`enrollment-instructions.md`) available for the entire run.
+four receiver files (`meeple_receiver.py`, `enrollment_worker.py`,
+`worker_supervisor.py`, `enrollment-instructions.md`) available for the entire run.
 
 ```sh
 # Defaults never start Hermes or touch UI; history is not downgraded.
@@ -151,7 +151,10 @@ and response. Nothing is exposed by HTTP except the Store's existing bounded
 status/evidence. These files can contain PII; protect/retain with the private
 Store and never commit or attach real screenshots. Screenshot/log/agent-session
 retention is not automatically pruned. The selected address and screenshots may
-reach the configured model provider under ADR0010's existing disclosure.
+reach the configured model provider under ADR0010's existing disclosure. Native
+screenshots capture the visible dedicated desktop, not just the selected signup:
+unrelated roster entries and visible account data may also reach that provider.
+Keep unrelated windows closed and minimize visible personal data before a run.
 
 Closed response fields: `version, job, attempt, item_id, group_url, mode, before,
 after, action, stop`. Observations contain only `membership, invitation,
@@ -160,8 +163,33 @@ authorized action, matching journals, distinct phase-correct private PNGs and
 known stop enums. Unknown keys, duplicate JSON keys, missing/truncated/foreign
 responses, stale captures and nonzero/timeout exits cannot publish success.
 The parent, **not the agent**, calls Store.set_outcome. Helper writes cannot
-change SQLite; manual CLI set also takes the processor lock. Timeout kills the
-child process group; inactive/finished/expired attempts reject further helper UI.
+change SQLite; manual CLI set also takes the processor lock. Linux task-local
+subreaper supervision retains both Store and native-display lock descriptors;
+the agent and its tools do not need to inherit them. Timeout, root exit (normal
+or abnormal), operator interruption, and launcher death invalidate the active
+token and kill/reap every task descendant before the supervisor releases locks.
+Session-detached terminal children are included. The kernel reparents orphans to
+the supervisor; `/proc/self/task/PID/children` enumerates only its direct children,
+whose unreaped PIDs cannot be reused. Repeated adoption/kill/reap ends only at
+`waitpid` ECHILD, never at an empty process snapshot. No global kill or unrelated
+process-tree scan is used. Helpers recheck active tokens before native commands.
+
+Prerequisites are Linux `PR_SET_CHILD_SUBREAPER` and readable procfs child lists;
+no cgroup delegation, service changes, or Hermes changes are required. Failure
+to establish containment launches no agent. A private `<native-lock>.containment`
+quarantine is created before startup and removed only after proven cleanup. If
+cleanup cannot be proved, the supervisor retains locks indefinitely rather than
+letting another run proceed. If the supervisor itself is killed (SIGKILL/OOM),
+its cleanup guarantee is lost, but the persistent quarantine prevents subsequent
+workers across Stores from using that display. This is an explicit fail-closed
+operator recovery condition, not an automatic retry: keep the display unused,
+identify and terminate/reap the old task's processes, and establish exclusive
+ownership before an operator removes the quarantine. Do not delete it merely
+because advisory locks are available. Killing the supervisor and launcher
+together is not a guaranteed cleanup path; neither is malicious agent escape
+through an unrelated external process/service. A delegated cgroup/service would
+be needed for stronger supervisor-death containment. No such host changes are
+made here. Uncertain enrollment remains `needs_verification` and requires review.
 
 This is a trusted local **hybrid agent** implementation, not a pixel-verifying
 Google API or an OS sandbox. Terminal access and local filesystem remain trusted:
@@ -219,3 +247,27 @@ Node's existing MockTimers experimental warning and expected synthetic HTTP/mail
 failure logs are test fixture output, not failed gates. CI, Android and real
 Google outcome proof were not run or claimed. No push/merge/release is part of
 this local implementation task.
+
+### Detached-child cleanup review correction
+
+The original inherited-FD/process-group regression did not match Hermes terminal
+commands, which create new sessions and close unrelated descriptors. Its
+replacement first failed in all six scenarios: timeout, normal root exit,
+abnormal root exit, SIGINT, SIGTERM, and SIGKILL of the launcher. The corrected
+subprocess test includes a separately session-detached child and grandchild,
+neither inheriting the locks, with delayed synthetic UI writes. It verifies
+root/helper PIDs are gone (not zombies), active token revocation, immediate
+reacquisition of both locks after cleanup, and no delayed action under new
+ownership. The test itself reaps RED-phase survivors, never leaving a live helper.
+
+Additional RED tests exposed retained NativeUI objects acting after revocation
+and a missing cross-Store quarantine gate; both are now GREEN. An explicit
+supervisor-SIGKILL test verifies uncertainty, active-token invalidation and
+quarantine refusal, **not** impossible cleanup by a dead supervisor.
+
+Split-module correction verification (all synthetic, except real ffmpeg on a
+synthetic lavfi image): **42 test methods passed**: containment 1 (six lifecycle
+subtests), native 10, enrollment 15, receiver 9, ledger 7. The enrollment module
+passed in 126.588 seconds; splitting avoided the previously encountered full
+command timeout. `git diff --check` and `npm run format:check` also passed. No
+live browser, Google enrollment, credentials, services or profiles were touched.

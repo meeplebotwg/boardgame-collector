@@ -6,8 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
-import signal
 import subprocess
+import sys
 import time
 import uuid
 
@@ -69,23 +69,43 @@ def locked(path):
 
 
 def invoke(args, **kwargs):
-    """Kill the whole tool process group on timeout; never leave a UI child running."""
+    """Retain ownership in an isolated subreaper until every child is reaped."""
     timeout = kwargs.pop('timeout')
     kwargs.pop('check', None)
     prompt = kwargs.pop('input')
-    with subprocess.Popen(args, stdin=subprocess.PIPE, start_new_session=True, **kwargs) as child:
+    directory = Path(kwargs.get('cwd', Path.cwd()))
+    quarantine = Path(kwargs.pop('containment_path', directory / '.containment'))
+    # Durable fail-closed latch: even SIGKILL of the supervisor cannot silently
+    # authorize another worker. Cleared ONLY by the supervisor after ECHILD.
+    with private_output(quarantine) as marker:
+        marker.write('Child cleanup not yet proven. Do not remove without operator review.\n')
+    read_fd, write_fd = os.pipe()
+    child = None
+    try:
+        fds = kwargs.pop('pass_fds', ())
+        child = subprocess.Popen(
+            [sys.executable, str(Path(__file__).with_name('worker_supervisor.py')), str(read_fd)],
+            stdin=subprocess.PIPE, start_new_session=True, pass_fds=(*fds, read_fd), **kwargs)
+        os.close(read_fd); read_fd = None
+        payload = json.dumps({'args': args, 'input': prompt, 'timeout': timeout,
+                              'quarantine': str(quarantine.resolve()),
+                              'active': str((directory / 'active.json').resolve())})
         try:
-            child.communicate(prompt, timeout=timeout)
+            child.communicate(payload)
         except BaseException:
-            os.killpg(child.pid, signal.SIGKILL)
+            # EOF, including abrupt launcher death, tells the supervisor to drain.
+            os.close(write_fd); write_fd = None
             child.wait()
             raise
-        # Any leftover agent-spawned helpers must not outlive the run either.
-        try:
-            os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if quarantine.exists():
+            raise subprocess.SubprocessError('Worker containment uncertain; operator review required')
+        if child.returncode == 124:
+            raise subprocess.TimeoutExpired(args, timeout)
         return subprocess.CompletedProcess(args, child.returncode)
+    finally:
+        for fd in (read_fd, write_fd):
+            if fd is not None:
+                os.close(fd)
 
 
 def prompt_for(path):
@@ -96,6 +116,9 @@ def prompt_for(path):
 def perform(store, job, item, mode, eligibility, config, store_lock, runner=None, allow_fallback=False):
     conf = ui_config(config)
     with locked(conf['lock']) as native_lock:
+        quarantine = Path(conf['lock'] + '.containment')
+        if quarantine.exists():
+            return 'needs_verification'
         attempt = uuid.uuid4().hex
         directory = store.root / 'jobs' / job / attempt
         directory.mkdir(mode=0o700, parents=True)
@@ -116,7 +139,8 @@ def perform(store, job, item, mode, eligibility, config, store_lock, runner=None
                     ['hermes', '--profile', 'meeple', 'chat', '--query-file', '-', '--max-turns', '40',
                      '--run-budget', '600', '--ignore-rules', '--toolsets', 'terminal,vision', '--quiet'],
                     input=prompt_for(path), text=True, pass_fds=(store_lock.fileno(), native_lock.fileno()),
-                    cwd=directory, timeout=660, check=False, stdout=log, stderr=subprocess.STDOUT)
+                    cwd=directory, containment_path=quarantine, timeout=660, check=False,
+                    stdout=log, stderr=subprocess.STDOUT)
             if result.returncode:
                 return 'needs_verification'
             response = load_json(directory / 'response.json')
@@ -220,17 +244,22 @@ class NativeUI:
                 self.work['group_url'] != GROUP_URL or self.work['mode'] not in MODES or
                 self.work['eligibility'] not in ELIGIBILITY or not MAILBOX.fullmatch(self.work['item']['email'])):
             raise ValueError('Invalid scope')
-        if (load_json(self.directory / 'active.json')['attempt'] != self.work['attempt'] or
-                time.time() > self.work['deadline'] or (self.directory / 'response.json').exists()):
-            raise ValueError('Attempt is not active')
+        self.require_active()
         self.conf = self.work['ui']
         self.env = dict(os.environ, DISPLAY=self.conf['display'], XAUTHORITY=self.conf['xauthority'])
 
+    def require_active(self):
+        if (load_json(self.directory / 'active.json')['attempt'] != self.work['attempt'] or
+                time.time() > self.work['deadline'] or (self.directory / 'response.json').exists()):
+            raise ValueError('Attempt is not active')
+
     def vnc(self, *args):
+        self.require_active()
         subprocess.run([self.conf['vncdo'], '-s', self.conf['vnc_server'], *args],
                        env=self.env, timeout=15, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def capture(self):
+        self.require_active()
         name = 'capture-' + uuid.uuid4().hex + '.png'
         path = self.directory / name
         # Reserve a private regular output file; ffmpeg overwrites only this file.

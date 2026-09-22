@@ -155,28 +155,59 @@ class NativeWorkerTests(unittest.TestCase):
         self.assertEqual(a.read(job_a)['items'][0]['status'], 'needs_verification')
         self.assertEqual(b.read(job_b)['items'][0]['status'], 'received')
 
-    def test_real_child_timeout_kills_descendants_and_releases_inherited_lock(self):
-        # A descendant intentionally inherits the advisory lock. Its survival would
-        # block the nonblocking reacquisition below. No browser process is started.
-        lockpath = self.root / 'timeout.lock'
-        marker = self.root / 'spawned'
-        with w.locked(lockpath) as lock:
-            script = ('import subprocess,sys,time,pathlib; '
-                      'subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],pass_fds=(' + str(lock.fileno()) + ',)); '
-                      'pathlib.Path(' + repr(str(marker)) + ').touch(); time.sleep(30)')
-            with self.assertRaises(subprocess.TimeoutExpired):
-                w.invoke([sys.executable, '-c', script], input='', text=True, pass_fds=(lock.fileno(),),
-                         timeout=1, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.assertTrue(marker.exists(), 'the descendant really started')
-        # Kernel scheduling of group death is asynchronous; bounded wait, not blind retry of work.
-        deadline = time.monotonic() + 2
-        while True:
-            try:
-                with w.locked(lockpath): pass
-                break
-            except BlockingIOError:
-                if time.monotonic() > deadline: raise
-                time.sleep(.01)
+    def test_retained_ui_object_cannot_act_after_token_revocation(self):
+        ui = w.NativeUI(self.path)
+        (self.root / 'active.json').unlink()
+        for action in (lambda: ui.click(5, 5), ui.capture):
+            with self.assertRaises((OSError, ValueError)):
+                action()
+        self.assertFalse((self.root / 'commands').exists())
+
+    def test_uncertain_containment_blocks_new_store_before_agent_launch(self):
+        store = m.Store(self.root / 'other-store')
+        job = store.intake(test_receiver.OWNER, test_receiver.batch())[0]
+        (self.root / 'native.lock.containment').write_text('unproven cleanup')
+        def forbidden(*args, **kwargs):
+            self.fail('must not launch while prior cleanup is uncertain')
+        self.assertEqual(m.run_job(store, job, True, mode='reconcile',
+                                  ui_config=self.config, runner=forbidden), 'needs_verification')
+        self.assertEqual(store.read(job)['items'][0]['status'], 'received')
+
+    def test_supervisor_death_quarantines_display_and_revokes_attempt(self):
+        import ctypes
+        import signal
+        libc = ctypes.CDLL(None)
+        previous = ctypes.c_int()
+        self.assertEqual(libc.prctl(37, ctypes.byref(previous), 0, 0, 0), 0)
+        self.assertEqual(libc.prctl(36, 1, 0, 0, 0), 0)
+        store = m.Store(self.root / 'death-store')
+        job = store.intake(test_receiver.OWNER, test_receiver.batch())[0]
+        pidfile = self.root / 'survivor.pid'
+        script = ('import os,signal,time,pathlib; '
+                  f'pathlib.Path({str(pidfile)!r}).write_text(str(os.getpid())); '
+                  'os.kill(os.getppid(),signal.SIGKILL); time.sleep(30)')
+        def killed(args, **kwargs):
+            return w.invoke([sys.executable, '-c', script], **kwargs)
+        try:
+            self.assertEqual(m.run_job(store, job, True, mode='reconcile',
+                                      ui_config=self.config, runner=killed), 'needs_verification')
+            self.assertEqual(store.read(job)['items'][0]['status'], 'needs_verification')
+            self.assertTrue((self.root / 'native.lock.containment').exists())
+            request, = (store.root / 'jobs' / job).glob('*/request.json')
+            self.assertFalse(request.with_name('active.json').exists())
+            with self.assertRaises((OSError, ValueError)):
+                w.NativeUI(request)
+            def forbidden(*args, **kwargs):
+                self.fail('supervisor death must not authorize another worker')
+            self.assertEqual(m.run_job(store, job, True, mode='reconcile',
+                                      ui_config=self.config, runner=forbidden), 'needs_verification')
+        finally:
+            if pidfile.exists():
+                pid = int(pidfile.read_text())
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                os.waitpid(pid, 0)
+            libc.prctl(36, previous.value, 0, 0, 0)
 
 
 if __name__ == '__main__':
