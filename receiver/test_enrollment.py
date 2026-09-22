@@ -71,6 +71,10 @@ class EnrollmentTests(unittest.TestCase):
         for excluded in ('IGNORE ALL RULES', '$(touch', 'host@example.org', 'fixture-authority',
                          '127.0.0.1::15991', 'Synthetic', '"ui"', '"source"', '"notes"', '"name"'):
             self.assertNotIn(excluded, prompt)
+        self.assertIn('https://groups.google.com/g/boardgamenightwg/members AND', prompt)
+        self.assertIn('verified displayed title "Robotics Game Night - Working Group"', prompt)
+        self.assertIn('club shorthand differs from this displayed title', prompt)
+        self.assertIn('does NOT authorize any other URL or group', prompt)
         commands = (self.root / 'commands').read_text()
         self.assertIn('boardgamenightwg/members', commands)
         self.assertIn('x11grab', commands)

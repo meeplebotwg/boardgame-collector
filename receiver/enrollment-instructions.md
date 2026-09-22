@@ -50,8 +50,12 @@ Commands:
 - `finish --stop none|login|captcha|permission|throttle|ambiguous|invitation_fallback|ineligible`
 
 Exact flow:
-1. `open-members`; separate `capture`; inspect it. Verify the browser address and
-   Board Game Night WG group. If sign-in/password/2FA/account picker appears,
+1. `open-members`; separate `capture`; inspect it. Verify the exact browser address
+   https://groups.google.com/g/boardgamenightwg/members AND the
+   verified displayed title "Robotics Game Night - Working Group".
+   The Board Game Night WG club shorthand differs from this displayed title;
+   this does NOT authorize any other URL or group, renaming, or identity bypass.
+   If sign-in/password/2FA/account picker appears,
    finish login. If CAPTCHA/security challenge appears, finish captcha. If no
    management permission, finish permission. Do not enter credentials, ask for
    secrets, solve CAPTCHA, change accounts, or bypass controls. Missing/unclear
