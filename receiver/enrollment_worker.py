@@ -341,7 +341,7 @@ def main():
     for name in ('open-members', 'capture', 'email'):
         sub.add_parser(name)
     key = sub.add_parser('key'); key.add_argument('key', choices=['Tab', 'Shift-Tab', 'Escape', 'BackSpace', 'Control-a', 'Control-l', 'Home', 'Down', 'Up'])
-    for name in ('click', 'submit'):
+    for name in ('click', 'apply-search', 'submit'):
         click = sub.add_parser(name); click.add_argument('x', type=int); click.add_argument('y', type=int)
         if name == 'submit':
             click.add_argument('--direct-selected', required=True, choices=['yes', 'no'])
@@ -368,6 +368,11 @@ def main():
             ui.key(*keys.get(args.key, (args.key.lower(),)))
         elif args.command == 'click':
             ui.click(args.x, args.y)
+        elif args.command == 'apply-search':
+            # Trusted native agent verifies the exact query and search surface;
+            # coordinates alone cannot establish screenshot semantics.
+            ui.click(args.x, args.y)
+            ui.key('enter')
         elif args.command == 'submit':
             ui.submit(args.x, args.y, args.direct_selected, args.fallback_warning)
         elif args.command == 'observe':

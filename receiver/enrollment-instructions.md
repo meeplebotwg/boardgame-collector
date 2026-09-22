@@ -41,7 +41,13 @@ Commands:
 - `capture` -> private PNG basename; only this attempt's files may be inspected
 - `click X Y` -> navigation/focus/toggle ONLY, never the final Add/Send button
 - `key Tab|Shift-Tab|Escape|BackSpace|Control-a|Control-l|Home|Down|Up` -> focus/search editing;
-  no Enter submission. Use visible UI search buttons when necessary.
+  general Enter remains forbidden.
+- `apply-search X Y` -> focus the observed search TEXTBOX, then paced Enter.
+  Only on visibly verified Members or Pending members search containing the
+  exact complete request email. Never in an Add dialog, recipient field, address
+  bar, or final Add/Send control. Inspect before and separately capture after.
+  This is a trusted-native-agent boundary: coordinates do not validate pixels,
+  search semantics or the query. Stop ambiguous if that context is not clear.
 - `email` -> type this ONE request email in a visibly empty member/invitation
   search or Members input (never Managers, Owners, welcome text, or message)
 - `observe before|after --membership present|absent|unknown
@@ -70,13 +76,25 @@ Exact flow:
    STOP immediately; do not interact further even to log in or clear a challenge.
 2. First inspect membership AND pending invitations for the exact complete email,
    not display name, substrings, total count, toast, autocomplete chip or contact.
-   Use Members search, `email`, and any visible search/apply control. Capture the
-   loaded result including exact query and rows/empty state. Clear a prior query
+   Use the header magnifier to reveal Members search, `email`, then
+   `apply-search` at the observed textbox. Typing alone does not apply the search.
+   Capture the loaded result including exact query and rows/empty state. If the
+   search row collapses, reopen via the header magnifier to show the full query.
+   Clear a prior query
    via focused Control-a/BackSpace before `email`; never append a second address.
-   Navigate via the group's People sidebar to Pending members / Invited members
-   (wording may vary). Check pending invitations, NOT only join requests. If a
-   Pending view has filters/tabs, explicitly select invitations. Search this same
-   exact email, capture results. If no complete exact search is available, inspect
+   Collapse the search row via its back arrow if needed to expose Main menu.
+   Open Main menu -> People -> Pending members; close Main menu if it obscures
+   the page. The observed Pending members page has separate join-request and
+   Pending invitations sections (Date invited / Invitation status), not tabs.
+   Use its header magnifier: scope must read Pending members. Leave the search
+   query as the exact email only; the optional Invited members shortcut inserts
+   role:invited, which is not the exact email query (clear it if present).
+   Use `email`, inspect the full query, then `apply-search` at its textbox.
+   Verify the Pending invitations section specifically: the observed empty state
+   is "No pending invitations matched your search". "No join requests matched
+   your search" alone proves nothing about invitations. Capture the exact query
+   and invitation result together. If layout differs, inspect actual labels;
+   never reuse remembered coordinates. If no complete exact search is available, inspect
    every page needed to prove absence; if not feasible within budget, mark unknown
    and stop. Empty visible page without a verified query/scope is not absence.
 3. `observe before` with separate member-list and invitation-list captures whose

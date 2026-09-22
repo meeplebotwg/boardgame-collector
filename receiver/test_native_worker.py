@@ -97,6 +97,23 @@ class NativeWorkerTests(unittest.TestCase):
             expected += ['pause', '0.5']
             self.assertEqual(args, expected)
 
+    def test_apply_search_focuses_then_uses_paced_enter_without_submission(self):
+        self.work.update(mode='reconcile', eligibility='unknown'); self.save()
+        result = self.cli('apply-search', '400', '116')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.commands(), [
+            ['--delay', '0', 'move', '400', '116', 'mousedown', '1', 'pause', '0.2',
+             'mouseup', '1', 'pause', '1'],
+            ['--delay', '0', 'keydown', 'enter', 'pause', '0.2', 'keyup', 'enter', 'pause', '0.5']])
+        self.assertFalse((self.root / 'submitted.json').exists())
+        previous = (self.root / 'commands').read_text()
+        for args in [('key', 'Enter'), ('key', 'Return'), ('apply-search', '-1', '116')]:
+            self.assertNotEqual(self.cli(*args).returncode, 0)
+        self.assertEqual((self.root / 'commands').read_text(), previous)
+        (self.root / 'active.json').unlink()
+        self.assertNotEqual(self.cli('apply-search', '400', '116').returncode, 0)
+        self.assertEqual((self.root / 'commands').read_text(), previous)
+
     def test_fixed_navigation_and_email_use_paced_released_characters(self):
         for command, text in [('open-members', w.GROUP_URL), ('email', self.work['item']['email'])]:
             (self.root / 'commands').unlink(missing_ok=True)
