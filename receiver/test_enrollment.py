@@ -76,7 +76,11 @@ class EnrollmentTests(unittest.TestCase):
         self.assertIn('club shorthand differs from this displayed title', prompt)
         self.assertIn('does NOT authorize any other URL or group', prompt)
         commands = (self.root / 'commands').read_text()
-        self.assertIn('boardgamenightwg/members', commands)
+        import ast
+        typed = ''.join(args[i + 1] for line in commands.splitlines()
+                        for args in [ast.literal_eval(line)]
+                        for i, arg in enumerate(args[:-1]) if arg == 'keydown')
+        self.assertIn('boardgamenightwg/members', typed)
         self.assertIn('x11grab', commands)
         self.assertEqual(m.run_job(self.store, job, True), 'nothing_pending')
         duplicate = fixtures.batch(); duplicate['key'] = 'f' * 32

@@ -259,8 +259,25 @@ class NativeUI:
 
     def vnc(self, *args):
         self.require_active()
-        subprocess.run([self.conf['vncdo'], '-s', self.conf['vnc_server'], *args],
+        subprocess.run([self.conf['vncdo'], '-s', self.conf['vnc_server'], '--delay', '0', *args],
                        env=self.env, timeout=15, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def key(self, *keys):
+        # VNC keyPress emits down/up without a hold: Firefox can miss it.
+        args = [part for key in keys for part in ('keydown', key)]
+        args += ['pause', '0.2']
+        args += [part for key in reversed(keys) for part in ('keyup', key)]
+        self.vnc(*args, 'pause', '0.5')
+
+    def type_scoped(self, text):
+        if text not in (GROUP_URL, self.work['item']['email']):
+            raise ValueError('Text outside fixed URL / single email scope')
+        # Each fully released chunk stays below the existing 15-second timeout.
+        for start in range(0, len(text), 64):
+            args = ['pause', '0.5']
+            for char in text[start:start + 64]:
+                args += ['keydown', char, 'pause', '0.05', 'keyup', char, 'pause', '0.03']
+            self.vnc(*args, 'pause', '0.5')
 
     def capture(self):
         self.require_active()
@@ -323,7 +340,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     for name in ('open-members', 'capture', 'email'):
         sub.add_parser(name)
-    key = sub.add_parser('key'); key.add_argument('key', choices=['Tab', 'Shift-Tab', 'Escape', 'BackSpace', 'Control-a', 'Down', 'Up'])
+    key = sub.add_parser('key'); key.add_argument('key', choices=['Tab', 'Shift-Tab', 'Escape', 'BackSpace', 'Control-a', 'Control-l', 'Home', 'Down', 'Up'])
     for name in ('click', 'submit'):
         click = sub.add_parser(name); click.add_argument('x', type=int); click.add_argument('y', type=int)
         if name == 'submit':
@@ -340,12 +357,15 @@ def main():
         if args.command == 'capture':
             print(ui.capture())
         elif args.command == 'open-members':
-            ui.vnc('key', 'ctrl-l', 'type', GROUP_URL, 'key', 'enter', 'pause', '1')
+            ui.key('ctrl', 'l')
+            ui.type_scoped(GROUP_URL)
+            ui.key('enter')
         elif args.command == 'email':
-            ui.vnc('type', ui.work['item']['email'])
+            ui.type_scoped(ui.work['item']['email'])
         elif args.command == 'key':
-            keys = {'Control-a': 'ctrl-a', 'Shift-Tab': 'shift-tab', 'BackSpace': 'bsp', 'Escape': 'esc'}
-            ui.vnc('key', keys.get(args.key, args.key.lower()))
+            keys = {'Control-a': ('ctrl', 'a'), 'Control-l': ('ctrl', 'l'),
+                    'Shift-Tab': ('shift', 'tab'), 'BackSpace': ('bsp',), 'Escape': ('esc',)}
+            ui.key(*keys.get(args.key, (args.key.lower(),)))
         elif args.command == 'click':
             ui.click(args.x, args.y)
         elif args.command == 'submit':

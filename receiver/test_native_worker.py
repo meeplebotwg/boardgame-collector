@@ -80,6 +80,46 @@ class NativeWorkerTests(unittest.TestCase):
         self.assertEqual(w.load_json(self.root / (name + '.json')),
                          {'attempt': self.work['attempt'], 'stage': 'before'})
 
+    def commands(self):
+        import ast
+        return [ast.literal_eval(line)[3:] for line in (self.root / 'commands').read_text().splitlines()]
+
+    def test_keys_hold_release_in_reverse_order_and_settle_focus(self):
+        for key, names in [('Control-l', ['ctrl', 'l']), ('Home', ['home']),
+                           ('Escape', ['esc']), ('Shift-Tab', ['shift', 'tab'])]:
+            result = self.cli('key', key)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = self.commands()[-1]
+            expected = ['--delay', '0']
+            for name in names: expected += ['keydown', name]
+            expected += ['pause', '0.2']
+            for name in reversed(names): expected += ['keyup', name]
+            expected += ['pause', '0.5']
+            self.assertEqual(args, expected)
+
+    def test_fixed_navigation_and_email_use_paced_released_characters(self):
+        for command, text in [('open-members', w.GROUP_URL), ('email', self.work['item']['email'])]:
+            (self.root / 'commands').unlink(missing_ok=True)
+            result = self.cli(command)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = self.commands()
+            if command == 'open-members':
+                self.assertIn('ctrl', calls[0])
+                self.assertEqual(calls[0][-2:], ['pause', '0.5'])
+                self.assertIn('enter', calls[-1])
+                calls = calls[1:-1]
+            typed = []
+            for args in calls:
+                self.assertEqual(args[:4], ['--delay', '0', 'pause', '0.5'])
+                events = args[4:-2]
+                self.assertLessEqual(len(events) // 8, 64)
+                for i in range(0, len(events), 8):
+                    down, char, pause, hold, up, released, gap, delay = events[i:i+8]
+                    self.assertEqual((down, pause, hold, up, released, gap, delay),
+                                     ('keydown', 'pause', '0.05', 'keyup', char, 'pause', '0.03'))
+                    typed.append(char)
+            self.assertEqual(''.join(typed), text)
+
     def test_escape_uses_real_vnc_keyname_and_no_arbitrary_text_or_url(self):
         self.assertEqual(self.cli('key', 'Escape').returncode, 0)
         self.assertIn("'esc'", (self.root / 'commands').read_text())

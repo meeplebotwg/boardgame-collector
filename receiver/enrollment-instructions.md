@@ -40,7 +40,7 @@ Commands:
 - `open-members`
 - `capture` -> private PNG basename; only this attempt's files may be inspected
 - `click X Y` -> navigation/focus/toggle ONLY, never the final Add/Send button
-- `key Tab|Shift-Tab|Escape|BackSpace|Control-a|Down|Up` -> focus/search editing;
+- `key Tab|Shift-Tab|Escape|BackSpace|Control-a|Control-l|Home|Down|Up` -> focus/search editing;
   no Enter submission. Use visible UI search buttons when necessary.
 - `email` -> type this ONE request email in a visibly empty member/invitation
   search or Members input (never Managers, Owners, welcome text, or message)
@@ -53,6 +53,13 @@ Exact flow:
 1. `open-members`; separate `capture`; inspect it. Verify the exact browser address
    https://groups.google.com/g/boardgamenightwg/members AND the
    verified displayed title "Robotics Game Night - Working Group".
+   Firefox may omit the https:// scheme; this alone is not a host mismatch.
+   If the address is horizontally clipped, use `key Control-l`, capture/inspect,
+   then if needed `key Home`, capture/inspect to expose its beginning. Verify the
+   complete groups.google.com host AND exact /g/boardgamenightwg/members path;
+   never infer them from a suffix. `key Escape` restores page focus; capture and
+   verify the full displayed group title before proceeding. These keys are only
+   for read-only address inspection/recovery, not arbitrary navigation or typing.
    The Board Game Night WG club shorthand differs from this displayed title;
    this does NOT authorize any other URL or group, renaming, or identity bypass.
    If sign-in/password/2FA/account picker appears,
