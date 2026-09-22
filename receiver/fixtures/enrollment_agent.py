@@ -10,7 +10,16 @@ prompt = sys.stdin.read()
 Path(os.environ['FIXTURE_PROMPT']).write_text(prompt)
 # Fixed machine-readable header, not email text in shell arguments.
 header = json.loads(prompt.splitlines()[0])
-work = json.loads(Path(header['request']).read_text())
+# The stand-in must consume the model-visible contract, never read request.json.
+# Helpers run in separate subprocesses and still read the canonical request.
+def no_request_read(event, args):
+    if event == 'open' and str(args[0]) == header['request']:
+        raise AssertionError('Worker must not read request.json')
+
+sys.addaudithook(no_request_read)
+assert set(header) == {'request', 'helper', 'item', 'mode', 'eligibility',
+                       'allow_fallback', 'group_url', 'deadline'}
+work = header
 assert work['group_url'] == 'https://groups.google.com/g/boardgamenightwg/members'
 assert set(work['item']) == {'id', 'email', 'status'}
 assert '--ignore-rules' in sys.argv and '--toolsets' in sys.argv

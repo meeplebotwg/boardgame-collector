@@ -108,9 +108,13 @@ def invoke(args, **kwargs):
                 os.close(fd)
 
 
-def prompt_for(path):
+def prompt_for(path, work):
     helper = Path(__file__).resolve()
-    return canonical({'request': str(path), 'helper': str(helper)}) + '\n' + (helper.parent / 'enrollment-instructions.md').read_text()
+    header = {'request': str(path), 'helper': str(helper),
+              'item': {key: work['item'][key] for key in ('id', 'email', 'status')}}
+    header.update({key: work[key] for key in
+                   ('mode', 'eligibility', 'allow_fallback', 'group_url', 'deadline')})
+    return canonical(header) + '\n' + (helper.parent / 'enrollment-instructions.md').read_text()
 
 
 def perform(store, job, item, mode, eligibility, config, store_lock, runner=None, allow_fallback=False):
@@ -138,7 +142,7 @@ def perform(store, job, item, mode, eligibility, config, store_lock, runner=None
                 result = (runner or invoke)(
                     ['hermes', '--profile', 'meeple', 'chat', '--query-file', '-', '--max-turns', '40',
                      '--run-budget', '600', '--ignore-rules', '--toolsets', 'terminal,vision', '--quiet'],
-                    input=prompt_for(path), text=True, pass_fds=(store_lock.fileno(), native_lock.fileno()),
+                    input=prompt_for(path, work), text=True, pass_fds=(store_lock.fileno(), native_lock.fileno()),
                     cwd=directory, containment_path=quarantine, timeout=660, check=False,
                     stdout=log, stderr=subprocess.STDOUT)
             if result.returncode:

@@ -61,7 +61,15 @@ class EnrollmentTests(unittest.TestCase):
         evidence = json.loads(view['items'][0]['evidence'])
         self.assertEqual(evidence['meaning'], 'membership_verified_after_direct_add')
         prompt = (self.root / 'prompt').read_text()
-        for excluded in ('IGNORE ALL RULES', '$(touch', 'host@example.org', 'new@example.org'):
+        header = json.loads(prompt.splitlines()[0])
+        self.assertEqual(set(header), {'request', 'helper', 'item', 'mode', 'eligibility',
+                                       'allow_fallback', 'group_url', 'deadline'})
+        persisted = json.loads(Path(header['request']).read_text())
+        for key in ('item', 'mode', 'eligibility', 'allow_fallback', 'group_url', 'deadline'):
+            self.assertEqual(header[key], persisted[key])
+        self.assertEqual(header['item'], {'id': '1' * 64, 'email': 'new@example.org', 'status': 'received'})
+        for excluded in ('IGNORE ALL RULES', '$(touch', 'host@example.org', 'fixture-authority',
+                         '127.0.0.1::15991', 'Synthetic', '"ui"', '"source"', '"notes"', '"name"'):
             self.assertNotIn(excluded, prompt)
         commands = (self.root / 'commands').read_text()
         self.assertIn('boardgamenightwg/members', commands)
@@ -174,7 +182,13 @@ class EnrollmentTests(unittest.TestCase):
         _, receipt = self.request(data=b); job = receipt['job']
         self.assertEqual(self.run_worker(job), 'processed')
         self.assertEqual([i['status'] for i in self.store.read(job)['items']], ['added', 'stored_contact', 'received'])
+        first_prompt = (self.root / 'prompt').read_text()
+        self.assertNotIn('second@example.org', first_prompt)
+        self.assertEqual(json.loads(first_prompt.splitlines()[0])['item']['email'], 'new@example.org')
         self.assertEqual(m.run_job(self.store, job, True, mode='reconcile', item_id='3' * 64, ui_config=self.worker('existing')), 'processed')
+        second_prompt = (self.root / 'prompt').read_text()
+        self.assertNotIn('new@example.org', second_prompt)
+        self.assertEqual(json.loads(second_prompt.splitlines()[0])['item']['email'], 'second@example.org')
         self.assertEqual([i['status'] for i in self.store.read(job)['items']], ['added', 'stored_contact', 'already_member'])
 
     def test_real_worker_timeout_after_submit_stays_uncertain(self):

@@ -145,6 +145,15 @@ one allowlisted ASCII mailbox, captures, closed observations and finalization.
 No shell interpolation of record strings. Unsupported mailbox syntax is review,
 not an invitation to put arbitrary text into a UI.
 
+The parent supplies only the selected item id/email/status, mode, eligibility,
+fallback authorization, group URL and deadline in the first-line JSON prompt
+alongside request/helper paths. The agent does not read the request file or UI
+configuration; its first action is the existing helper's `open-members`. The
+persisted request remains helper authority. Any security refusal ends the run
+without alternate commands/transports or policy changes; missing response stays
+needs_verification. Synthetic subprocess tests do not replace a real single-query
+CLI rehearsal under unchanged security settings.
+
 Each fresh `jobs/JOB/ATTEMPT/` contains private request, log, screenshots with
 phase metadata, before/after observation journals, a pre-click submission marker,
 and response. Nothing is exposed by HTTP except the Store's existing bounded
